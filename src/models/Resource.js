@@ -1,50 +1,61 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const resourceSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: true,
-    trim: true
+const resourceSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    type: {
+      type: String,
+      enum: ["pdf", "video", "image", "document"],
+      required: true,
+    },
+    url: {
+      type: String,
+      required: true,
+    },
+    cloudinaryPublicId: {
+      type: String,
+    },
+    // ImageKit file ID (replaces cloudinaryPublicId for new uploads)
+    imagekitFileId: {
+      type: String,
+    },
+    content: {
+      type: String,
+    },
+    thumbnailUrl: {
+      type: String,
+    },
+    previewUrl: {
+      type: String,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    allowedPlans: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Plan",
+      },
+    ],
+    accessedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
-  description: {
-    type: String,
-    trim: true
-  },
-  type: {
-    type: String,
-    enum: ['pdf', 'video', 'image', 'document'],
-    required: true
-  },
-  url: {
-    type: String,
-    required: true
-  },
-  cloudinaryPublicId: {
-    type: String
-  },
-  content: {
-    type: String
-  },
-  thumbnailUrl: {
-    type: String
-  },
-  previewUrl: {
-    type: String
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  allowedPlans: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Plan'
-  }],
-  accessedBy: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }]
-}, {
-  timestamps: true
-});
+  {
+    timestamps: true,
+  }
+);
 
-export default mongoose.model('Resource', resourceSchema);
+export default mongoose.model("Resource", resourceSchema);
