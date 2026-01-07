@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { v4 as uuidv4 } from "uuid";
 import { uploadToImageKit } from "../../config/imagekit.js";
-import { User } from "../../models/index.js";
+import { User, Session } from "../../models/index.js";
 import Resource from "../../models/Resource.js";
 import {
   createTransporter,
@@ -214,20 +215,70 @@ export const login = async (req, res) => {
         .json({ error: "Subscription expired. Please renew your plan." });
     }
 
-    // Generate JWT token with nested payload structure
+    // ============================================
+    // TWO-DEVICE SESSION MANAGEMENT (FIFO)
+    // ============================================
+
+    // 1. Fetch all active sessions for this user (sorted by creation time, oldest first)
+    const existingSessions = await Session.find({ userId: user._id })
+      .sort({ createdAt: 1 }) // Oldest first (FIFO)
+      .exec();
+
+    console.log(
+      `User ${user.email} has ${existingSessions.length} active session(s)`
+    );
+
+    // 2. If user already has 2 or more sessions, delete the oldest one
+    if (existingSessions.length >= 2) {
+      const oldestSession = existingSessions[0];
+      await Session.findByIdAndDelete(oldestSession._id);
+      console.log(
+        `🔄 Revoked oldest session for ${user.email} (sessionId: ${oldestSession.sessionId})`
+      );
+    }
+
+    // 3. Generate new sessionId using UUID
+    const sessionId = uuidv4();
+
+    // 4. Extract device info and IP address
+    const deviceInfo = req.headers["user-agent"] || "Unknown Device";
+    const ipAddress = req.ip || req.connection.remoteAddress || "Unknown IP";
+
+    // 5. Create new session in MongoDB
+    const newSession = new Session({
+      userId: user._id,
+      sessionId: sessionId,
+      deviceInfo: deviceInfo,
+      ipAddress: ipAddress,
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    });
+
+    await newSession.save();
+    console.log(
+      `✅ New session created for ${user.email} (sessionId: ${sessionId})`
+    );
+
+    // ============================================
+    // GENERATE JWT WITH SESSION ID
+    // ============================================
+
+    // Generate JWT token with sessionId embedded (15 minutes expiry)
     const token = jwt.sign(
       {
         payload: {
           userId: user._id,
           email: user.email,
           planId: user.subscription.planId?._id,
+          sessionId: sessionId, // CRITICAL: Session ID for validation
         },
         userId: user._id,
         email: user.email,
         planId: user.subscription.planId?._id,
+        sessionId: sessionId, // CRITICAL: Session ID for validation
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" } // Short-lived token for security
     );
 
     console.log(`User logged in: ${user.email}`);
@@ -237,10 +288,10 @@ export const login = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 15 * 60 * 1000, // 15 minutes to match JWT expiry
     });
 
-    // Return user info
+    // Return user info with session details
     res.json({
       user: {
         id: user._id,
@@ -256,6 +307,10 @@ export const login = async (req, res) => {
         },
       },
       userToken: token,
+      sessionInfo: {
+        deviceInfo: deviceInfo,
+        activeSessions: Math.min(existingSessions.length + 1, 2), // Max 2
+      },
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -421,12 +476,10 @@ export const resetPassword = async (req, res) => {
       });
       if (expiredUser) {
         console.log("⏰ Token found but expired for user:", expiredUser.email);
-        return res
-          .status(400)
-          .json({
-            error:
-              "Reset token has expired. Please request a new password reset.",
-          });
+        return res.status(400).json({
+          error:
+            "Reset token has expired. Please request a new password reset.",
+        });
       }
       return res.status(400).json({ error: "Invalid or expired reset token" });
     }
@@ -555,6 +608,22 @@ export const sendPasswordSetupEmail = async (user, isNewUser = true) => {
 // POST /api/auth/logout
 export const logout = async (req, res) => {
   try {
+    // Extract sessionId from authenticated user (set by auth middleware)
+    const sessionId = req.user?.sessionId;
+
+    if (sessionId) {
+      // Delete the session from MongoDB
+      const deletedSession = await Session.findOneAndDelete({ sessionId });
+
+      if (deletedSession) {
+        console.log(
+          `🔓 Session deleted for user ${req.user.email} (sessionId: ${sessionId})`
+        );
+      } else {
+        console.log(`⚠️ Session not found for sessionId: ${sessionId}`);
+      }
+    }
+
     // Clear the HTTP-only cookie
     res.clearCookie("userToken", {
       httpOnly: true,

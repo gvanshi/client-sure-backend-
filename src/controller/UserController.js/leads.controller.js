@@ -621,30 +621,35 @@ export const exportLeadData = async (req, res) => {
 // POST /api/auth/leads/bulk-export
 export const bulkExportLeads = async (req, res) => {
   try {
-    const { leadIds } = req.body;
+    const { filters } = req.body;
     const userId = req.user.userId;
 
-    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
-      return res.status(400).json({ error: "Lead IDs array is required" });
+    if (!filters || typeof filters !== "object") {
+      return res.status(400).json({ error: "Filters object is required" });
     }
 
+    const {
+      exportAll,
+      page,
+      limit = 10,
+      startPage,
+      endPage,
+      date,
+      category,
+      city,
+      country,
+      search,
+      startDate,
+      endDate,
+    } = filters;
+
     const user = await User.findById(userId).select("accessedLeads");
-    const accessedLeadIds =
-      user?.accessedLeads?.map((item) => item.leadId.toString()) || [];
-
-    const validLeadIds = leadIds.filter((id) => accessedLeadIds.includes(id));
-
-    if (validLeadIds.length === 0) {
-      return res.status(403).json({
-        error: "No accessible leads found",
+    if (!user || !user.accessedLeads || user.accessedLeads.length === 0) {
+      return res.status(404).json({
+        error: "No accessed leads found",
         message: "You need to access leads first to export data",
       });
     }
-
-    const leads = await Lead.find({
-      _id: { $in: validLeadIds },
-      isActive: true,
-    });
 
     // Format date as DD/MM/YYYY
     const formatDate = (dateString) => {
@@ -656,11 +661,104 @@ export const bulkExportLeads = async (req, res) => {
       return `${day}/${month}/${year}`;
     };
 
-    const leadsData = leads.map((lead) => {
-      const accessedLead = user.accessedLeads.find(
-        (item) => item.leadId.toString() === lead._id.toString()
-      );
+    // 1. Filter accessedLeads by Access Date if provided
+    let filteredAccessList = user.accessedLeads;
+    if (date) {
+      const filterDate = new Date(date);
+      const startOfDay = new Date(filterDate.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(filterDate.setHours(23, 59, 59, 999));
 
+      filteredAccessList = filteredAccessList.filter((item) => {
+        const accessedDate = new Date(item.accessedAt);
+        return accessedDate >= startOfDay && accessedDate <= endOfDay;
+      });
+    }
+
+    // 2. Get all lead IDs from the (potentially date-filtered) list
+    const accessedLeadIds = filteredAccessList.map((item) => item.leadId);
+
+    // 3. Build query for Leads (Search + Property Filters)
+    let leadQuery = { _id: { $in: accessedLeadIds }, isActive: true };
+
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      leadQuery.$or = [
+        { name: searchRegex },
+        { leadId: searchRegex },
+        { email: searchRegex },
+        { phone: searchRegex },
+        { city: searchRegex },
+        { category: searchRegex },
+      ];
+    }
+
+    if (category) leadQuery.category = category;
+    if (city) leadQuery.city = city;
+    if (country) leadQuery.country = country;
+
+    // Filter by createdAt date range if provided
+    if (startDate || endDate) {
+      leadQuery.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        leadQuery.createdAt.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        leadQuery.createdAt.$lte = end;
+      }
+    }
+
+    // 4. Fetch matching leads
+    const matchingLeads = await Lead.find(leadQuery);
+
+    // 5. Combine Access Info with Lead Details & Maintain Access Order
+    const combinedLeads = filteredAccessList
+      .map((accessItem) => {
+        const leadDetails = matchingLeads.find(
+          (l) => l._id.toString() === accessItem.leadId.toString()
+        );
+        if (!leadDetails) return null;
+
+        return {
+          lead: leadDetails,
+          accessedAt: accessItem.accessedAt,
+        };
+      })
+      .filter((item) => item !== null);
+
+    // 6. Apply pagination based on export type
+    let leadsToExport = [];
+
+    if (exportAll === "true" || exportAll === true) {
+      // Export all leads
+      leadsToExport = combinedLeads;
+    } else if (startPage && endPage) {
+      // Export custom page range
+      const startIdx = (parseInt(startPage) - 1) * parseInt(limit);
+      const endIdx = parseInt(endPage) * parseInt(limit);
+      leadsToExport = combinedLeads.slice(startIdx, endIdx);
+    } else if (page) {
+      // Export current page
+      const startIdx = (parseInt(page) - 1) * parseInt(limit);
+      const endIdx = startIdx + parseInt(limit);
+      leadsToExport = combinedLeads.slice(startIdx, endIdx);
+    } else {
+      // Default: export all
+      leadsToExport = combinedLeads;
+    }
+
+    if (leadsToExport.length === 0) {
+      return res.status(404).json({
+        error: "No leads found to export",
+        message: "No leads match the specified criteria",
+      });
+    }
+
+    // 7. Format data for Excel export
+    const leadsData = leadsToExport.map(({ lead, accessedAt }) => {
       return {
         "Lead ID": lead.leadId,
         Name: lead.name,
@@ -676,7 +774,7 @@ export const bulkExportLeads = async (req, res) => {
         Instagram: lead.instagram || "N/A",
         "Google Maps": lead.googleMapLink || "N/A",
         "Last Verified": formatDate(lead.lastVerifiedAt),
-        "Accessed Date": formatDate(accessedLead?.accessedAt),
+        "Accessed Date": formatDate(accessedAt),
       };
     });
 
@@ -695,6 +793,7 @@ export const bulkExportLeads = async (req, res) => {
 
     res.send(buffer);
   } catch (error) {
+    console.error("Bulk export error:", error);
     res.status(500).json({ error: error.message });
   }
 };
