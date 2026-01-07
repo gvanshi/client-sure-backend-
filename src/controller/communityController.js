@@ -241,10 +241,6 @@ export const likePost = async (req, res) => {
     const { postId } = req.params;
     const userId = req.user.id;
 
-    console.log("=== LIKE REQUEST START ===");
-    console.log("PostId:", postId);
-    console.log("UserId:", userId);
-
     // Check daily like limit
     const limitCheck = await canPerformAction(userId, "likes");
     if (!limitCheck.canPerform) {
@@ -273,11 +269,7 @@ export const likePost = async (req, res) => {
       (like) => like.user_id.toString() === userIdStr
     );
 
-    console.log("Already liked check:", alreadyLiked);
-    console.log("Current likes:", post.likes.length);
-
     if (alreadyLiked) {
-      console.log("❌ Post already liked");
       return res.status(400).json({ message: "Post already liked" });
     }
 
@@ -298,9 +290,6 @@ export const likePost = async (req, res) => {
     // Get updated remaining limits
     const remainingLimits = await getRemainingLimits(userId);
 
-    console.log("✅ Like added, total likes:", post.likes.length);
-    console.log("=== LIKE REQUEST END ===");
-
     res.json({
       success: true,
       message: "Post liked successfully",
@@ -320,54 +309,27 @@ export const unlikePost = async (req, res) => {
     const { postId } = req.params;
     const userId = req.user.id;
 
-    console.log("=== UNLIKE REQUEST START ===");
-    console.log("PostId:", postId);
-    console.log("UserId:", userId);
-    console.log("UserId type:", typeof userId);
-
     const post = await Feedback.findById(postId);
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    console.log("Total likes before:", post.likes.length);
-    console.log(
-      "All likes:",
-      post.likes.map((like) => ({
-        id: like.user_id.toString(),
-        type: typeof like.user_id,
-      }))
-    );
-
     // Convert userId to string for comparison
     const userIdStr = userId.toString();
-    console.log("UserIdStr:", userIdStr);
 
     // Find like by this user
     const likeIndex = post.likes.findIndex((like) => {
       const likeUserIdStr = like.user_id.toString();
-      console.log(
-        "Comparing:",
-        likeUserIdStr,
-        "===",
-        userIdStr,
-        "=",
-        likeUserIdStr === userIdStr
-      );
       return likeUserIdStr === userIdStr;
     });
 
-    console.log("Found like at index:", likeIndex);
-
     if (likeIndex === -1) {
-      console.log("❌ No like found for this user");
       return res
         .status(400)
         .json({ message: "You have not liked this post yet" });
     }
 
     // Remove the like
-    console.log("✅ Removing like at index:", likeIndex);
     post.likes.splice(likeIndex, 1);
     await post.save();
 
@@ -378,9 +340,6 @@ export const unlikePost = async (req, res) => {
         "communityActivity.likesGiven": -1,
       },
     });
-
-    console.log("Total likes after:", post.likes.length);
-    console.log("=== UNLIKE REQUEST END ===");
 
     res.json({ message: "Post unliked successfully" });
   } catch (error) {
