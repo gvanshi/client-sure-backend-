@@ -1,31 +1,43 @@
-import express from 'express';
+import express from "express";
 
 const router = express.Router();
 
 // GET /api/dummy-checkout - Dummy payment page
-router.get('/dummy-checkout', async (req, res) => {
-    const { order } = req.query;
+router.get("/dummy-checkout", async (req, res) => {
+  const { order } = req.query;
 
-    if (!order) {
-        return res.status(400).send('Missing order parameter');
+  const backendUrl =
+    process.env.BACKEND_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://client-sure-backend.vercel.app"
+      : `http://localhost:${process.env.PORT || 5001}`);
+
+  const frontendUrl =
+    process.env.FRONTEND_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://client-sure-frontend.vercel.app"
+      : "http://localhost:3000");
+
+  if (!order) {
+    return res.status(400).send("Missing order parameter");
+  }
+
+  // Get order details to show correct amount
+  let orderAmount = 299;
+  let orderType = "subscription";
+  try {
+    const { Order } = await import("../models/index.js");
+    const orderDoc = await Order.findOne({ clientOrderId: order });
+    if (orderDoc) {
+      orderAmount = orderDoc.amount;
+      orderType = orderDoc.type || "subscription";
     }
+  } catch (error) {
+    console.log("Could not fetch order details:", error.message);
+  }
 
-    // Get order details to show correct amount
-    let orderAmount = 299;
-    let orderType = 'subscription';
-    try {
-        const { Order } = await import('../models/index.js');
-        const orderDoc = await Order.findOne({ clientOrderId: order });
-        if (orderDoc) {
-            orderAmount = orderDoc.amount;
-            orderType = orderDoc.type || 'subscription';
-        }
-    } catch (error) {
-        console.log('Could not fetch order details:', error.message);
-    }
-
-    // Simple HTML page for dummy payment
-    const html = `
+  // Simple HTML page for dummy payment
+  const html = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -59,14 +71,8 @@ router.get('/dummy-checkout', async (req, res) => {
         <script>
             function simulatePayment(status) {
                 // Dynamic URLs based on environment
-                const isProduction = window.location.hostname !== 'localhost';
-                const backendPort = window.location.port || '5001';
-                const backendUrl = isProduction 
-                    ? 'https://client-sure-backend.vercel.app'
-                    : 'http://localhost:' + backendPort;
-                const frontendUrl = isProduction 
-                    ? 'https://client-sure-frontend.vercel.app'
-                    : 'http://localhost:3000';
+                const backendUrl = "${backendUrl}";
+                const frontendUrl = "${frontendUrl}";
                 
                 const webhookUrl = backendUrl + '/api/payments/webhook';
 
@@ -117,7 +123,7 @@ router.get('/dummy-checkout', async (req, res) => {
     </html >
     `;
 
-    res.send(html);
+  res.send(html);
 });
 
 export default router;

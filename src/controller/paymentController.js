@@ -1,58 +1,75 @@
-import mongoose from 'mongoose';
-import crypto from 'crypto';
-import bcrypt from 'bcrypt';
-import { Plan, Order, User } from '../models/index.js';
-import { createTransporter, sendEmailWithRetry } from '../utils/emailUtils.js';
-import { generateReferralCode, validateReferralCode, updateReferralStats } from '../utils/referralUtils.js';
+import mongoose from "mongoose";
+import crypto from "crypto";
+import bcrypt from "bcrypt";
+import { Plan, Order, User } from "../models/index.js";
+import { createTransporter, sendEmailWithRetry } from "../utils/emailUtils.js";
+import {
+  generateReferralCode,
+  validateReferralCode,
+  updateReferralStats,
+} from "../utils/referralUtils.js";
 
 // Setup nodemailer transporter
 const transporter = createTransporter();
 
 export const createOrder = async (req, res) => {
   try {
-    const { planId, name, email, phone, planPrice, planName, referralCode } = req.body;
-    console.log('Create order with data:', { planId, name, email, phone, planPrice, planName });
+    const { planId, name, email, phone, planPrice, planName, referralCode } =
+      req.body;
+    console.log("Create order with data:", {
+      planId,
+      name,
+      email,
+      phone,
+      planPrice,
+      planName,
+    });
 
     // Validate required fields
     if (!planId || !name || !email) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: planId, name, email' 
+      return res.status(400).json({
+        error: "Missing required fields: planId, name, email",
       });
     }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ 
-        error: 'Invalid email format' 
+      return res.status(400).json({
+        error: "Invalid email format",
       });
     }
 
     // Validate planId exists
-    console.log('Looking up plan with ID:', planId);
+    console.log("Looking up plan with ID:", planId);
     let plan = await Plan.findOne({ providerPlanId: planId });
-    
+
     if (!plan) {
       if (mongoose.Types.ObjectId.isValid(planId)) {
         plan = await Plan.findById(planId);
       }
     }
-    
+
     if (!plan) {
-      return res.status(400).json({ 
-        error: 'Invalid plan' 
+      return res.status(400).json({
+        error: "Invalid plan",
       });
     }
-    
-    console.log('Found plan:', { id: plan._id, name: plan.name, price: plan.price, dailyTokens: plan.dailyTokens });
+
+    console.log("Found plan:", {
+      id: plan._id,
+      name: plan.name,
+      price: plan.price,
+      dailyTokens: plan.dailyTokens,
+    });
 
     // Check if user already exists
     let user = await User.findOne({ email: email.toLowerCase() });
-    
+
     if (!user) {
       // Register new user
-      console.log('Registering new user:', email);
-      
+      console.log("Registering new user:", email);
+
       // Use email as initial password and hash it
       const saltRounds = 12;
       const passwordHash = await bcrypt.hash(email, saltRounds);
@@ -62,13 +79,16 @@ export const createOrder = async (req, res) => {
       if (referralCode) {
         referrer = await validateReferralCode(referralCode);
         if (!referrer) {
-          return res.status(400).json({ error: 'Invalid referral code' });
+          return res.status(400).json({ error: "Invalid referral code" });
         }
       }
 
       // Generate reset token for welcome email
-      const resetToken = crypto.randomBytes(32).toString('hex');
-      const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const resetTokenHash = crypto
+        .createHash("sha256")
+        .update(resetToken)
+        .digest("hex");
       const resetTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
       // Generate unique referral code for new user
@@ -76,18 +96,22 @@ export const createOrder = async (req, res) => {
       let isUnique = false;
       while (!isUnique) {
         newReferralCode = generateReferralCode();
-        const existingUser = await User.findOne({ referralCode: newReferralCode });
+        const existingUser = await User.findOne({
+          referralCode: newReferralCode,
+        });
         if (!existingUser) isUnique = true;
       }
 
       // Calculate monthly allocation and dates based on plan
       const monthlyAllocation = plan.durationDays * plan.dailyTokens;
       const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + (plan.durationDays * 24 * 60 * 60 * 1000));
-      
-      console.log('Plan duration:', plan.durationDays, 'days');
-      console.log('Subscription dates:', { startDate, endDate });
-      
+      const endDate = new Date(
+        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+      );
+
+      console.log("Plan duration:", plan.durationDays, "days");
+      console.log("Subscription dates:", { startDate, endDate });
+
       // Create new user with proper token allocation
       user = new User({
         name: name.trim(),
@@ -106,19 +130,19 @@ export const createOrder = async (req, res) => {
         referralStats: {
           totalReferrals: 0,
           activeReferrals: 0,
-          totalEarnings: 0
+          totalEarnings: 0,
         },
         subscription: {
           planId: plan._id,
           startDate: startDate,
           endDate: endDate,
           dailyTokens: plan.dailyTokens,
-          monthlyAllocation: monthlyAllocation
-        }
+          monthlyAllocation: monthlyAllocation,
+        },
       });
 
       await user.save();
-      console.log('New user registered:', user.email);
+      console.log("New user registered:", user.email);
 
       // Add referral relationship if referrer exists
       if (referrer) {
@@ -126,43 +150,47 @@ export const createOrder = async (req, res) => {
           userId: user._id,
           joinedAt: new Date(),
           isActive: false,
-          subscriptionStatus: 'pending'
+          subscriptionStatus: "pending",
         });
         await referrer.save();
         await updateReferralStats(referrer._id);
-        console.log(`Referral relationship created: ${user.email} -> ${referrer.email}`);
+        console.log(
+          `Referral relationship created: ${user.email} -> ${referrer.email}`
+        );
       }
 
       // Send welcome email with password reset link
       const planInfo = { planId, planName: plan.name, planPrice: plan.price };
       await sendWelcomeEmail(user, resetToken, planInfo);
     } else {
-      console.log('User already exists:', email);
+      console.log("User already exists:", email);
       // Update existing user's subscription for new plan purchase
       const monthlyAllocation = plan.durationDays * plan.dailyTokens;
       const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + (plan.durationDays * 24 * 60 * 60 * 1000));
-      
+      const endDate = new Date(
+        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+      );
+
       user.subscription = {
         planId: plan._id,
         startDate: startDate,
         endDate: endDate,
         isActive: true,
         dailyTokens: plan.dailyTokens,
-        monthlyAllocation: monthlyAllocation
+        monthlyAllocation: monthlyAllocation,
       };
       user.tokens = plan.dailyTokens;
       user.monthlyTokensTotal = monthlyAllocation;
       user.monthlyTokensUsed = 0;
       user.monthlyTokensRemaining = monthlyAllocation;
-      
+
       await user.save();
-      console.log('Updated existing user subscription:', user.email);
+      console.log("Updated existing user subscription:", user.email);
     }
 
     // Create local Order with pending status - use actual plan price
     const clientOrderId = new mongoose.Types.ObjectId().toString();
-    console.log('Creating order with amount:', plan.price);
+    console.log("Creating order with amount:", plan.price);
     const order = await Order.create({
       clientOrderId: clientOrderId,
       providerOrderId: `dummy_${clientOrderId}`,
@@ -170,23 +198,27 @@ export const createOrder = async (req, res) => {
       userName: name.trim(),
       planId: plan._id,
       amount: plan.price, // Always use plan price from database
-      status: 'pending',
-      type: 'subscription',
-      referralCode: referralCode || null
+      status: "pending",
+      type: "subscription",
+      referralCode: referralCode || null,
     });
-    console.log('Order created with amount:', order.amount);
+    console.log("Order created with amount:", order.amount);
 
     // Create payment payload with dynamic URL
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://client-sure-backend.vercel.app'
-      : `http://localhost:${process.env.PORT || 5000}`;
-    
+    const baseUrl =
+      process.env.BACKEND_URL ||
+      (process.env.NODE_ENV === "production"
+        ? process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : "https://client-sure-backend.vercel.app"
+        : `http://localhost:${process.env.PORT || 5000}`);
+
     const paymentPayload = {
       checkoutUrl: `${baseUrl}/dummy-checkout?order=${order.clientOrderId}`,
       checkoutToken: `dummy-token-${Date.now()}`,
       orderAmount: plan.price,
       userEmail: email.toLowerCase().trim(),
-      userName: name.trim()
+      userName: name.trim(),
     };
 
     console.log(`Order created: ${order.clientOrderId} for ${email}`);
@@ -203,14 +235,16 @@ export const createOrder = async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        isNewUser: !await User.findOne({ email: email.toLowerCase(), createdAt: { $lt: user.createdAt } })
-      }
+        isNewUser: !(await User.findOne({
+          email: email.toLowerCase(),
+          createdAt: { $lt: user.createdAt },
+        })),
+      },
     });
-
   } catch (error) {
-    console.error('Create order error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error' 
+    console.error("Create order error:", error);
+    res.status(500).json({
+      error: "Internal server error",
     });
   }
 };
@@ -219,22 +253,28 @@ export const createOrder = async (req, res) => {
 const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
   try {
     // Create reset link
-    const resetLink = `${process.env.BASE_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+    const resetLink = `${
+      process.env.BASE_URL
+    }/reset-password?token=${resetToken}&email=${encodeURIComponent(
+      user.email
+    )}`;
 
     // Plan information section
-    const planSection = planInfo ? `
+    const planSection = planInfo
+      ? `
       <div style="background: #e8f5e8; padding: 20px; border-left: 4px solid #28a745; margin: 20px 0;">
         <h3 style="margin-top: 0; color: #28a745;">Selected Plan:</h3>
         <p><strong>Plan:</strong> ${planInfo.planName}</p>
         <p><strong>Price:</strong> ₹${planInfo.planPrice}</p>
         <p style="color: #666; font-size: 14px; margin-bottom: 0;">Complete your payment to activate your subscription.</p>
       </div>
-    ` : '';
+    `
+      : "";
 
     const mailOptions = {
       from: `"ClientSure" <${process.env.SMTP_USER}>`,
       to: user.email,
-      subject: 'Welcome to ClientSure - Set Your Password',
+      subject: "Welcome to ClientSure - Set Your Password",
       html: `
         <!DOCTYPE html>
         <html>
@@ -268,7 +308,9 @@ const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
               <h3 style="margin-top: 0; color: #007cba;">Your Account Details:</h3>
               <p><strong>Name:</strong> ${user.name}</p>
               <p><strong>Email:</strong> ${user.email}</p>
-              ${user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ''}
+              ${
+                user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ""
+              }
               <p><strong>Temporary Password:</strong> ${user.email}</p>
               <p style="color: #666; font-size: 14px; margin-bottom: 0;">You can use your email as password to login temporarily, but we recommend setting a secure password.</p>
             </div>
@@ -283,22 +325,24 @@ const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
             </p>
             
             <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
-              <p>This email was sent to ${user.email} for your new ClientSure account.</p>
+              <p>This email was sent to ${
+                user.email
+              } for your new ClientSure account.</p>
               <p>© ${new Date().getFullYear()} ClientSure. All rights reserved.</p>
             </div>
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     // Send email with retry mechanism
     await sendEmailWithRetry(transporter, mailOptions);
     console.log(`Welcome email sent to ${user.email}`);
-    
+
     return true;
   } catch (error) {
-    console.error('Send welcome email error:', error);
+    console.error("Send welcome email error:", error);
     return false;
   }
 };

@@ -1,25 +1,33 @@
-import express from 'express';
-import TokenTransaction from '../models/TokenTransaction.js';
-import { User } from '../models/index.js';
+import express from "express";
+import TokenTransaction from "../models/TokenTransaction.js";
+import { User } from "../models/index.js";
 
 const router = express.Router();
 
 // GET /dummy-token-checkout - Dummy payment page for tokens
-router.get('/dummy-token-checkout', async (req, res) => {
+router.get("/dummy-token-checkout", async (req, res) => {
   try {
     const { transaction } = req.query;
-    
+
     if (!transaction) {
-      return res.status(400).send('Transaction ID required');
+      return res.status(400).send("Transaction ID required");
     }
 
+    const frontendUrl =
+      process.env.FRONTEND_URL ||
+      (process.env.NODE_ENV === "production"
+        ? "https://client-sure-frontend.vercel.app"
+        : "http://localhost:3000");
+
     // Find transaction
-    const tokenTransaction = await TokenTransaction.findOne({ transactionId: transaction })
-      .populate('packageId', 'name tokens price')
-      .populate('userId', 'name email');
+    const tokenTransaction = await TokenTransaction.findOne({
+      transactionId: transaction,
+    })
+      .populate("packageId", "name tokens price")
+      .populate("userId", "name email");
 
     if (!tokenTransaction) {
-      return res.status(404).send('Transaction not found');
+      return res.status(404).send("Transaction not found");
     }
 
     const html = `
@@ -100,9 +108,8 @@ router.get('/dummy-token-checkout', async (req, res) => {
               
               const result = await response.json();
               
-              const frontendUrl = window.location.hostname === 'localhost' 
-                ? 'http://localhost:3000'
-                : 'https://client-sure-frontend.vercel.app';
+              const frontendUrl = "${frontendUrl}";
+
               
               if (status === 'success' && result.success) {
                 window.location.href = frontendUrl + '/user/profile/tokens?purchase=success&tokens=${tokenTransaction.packageId.tokens}';
@@ -113,9 +120,8 @@ router.get('/dummy-token-checkout', async (req, res) => {
               }
             } catch (error) {
               console.error('Payment error:', error);
-              const frontendUrl = window.location.hostname === 'localhost' 
-                ? 'http://localhost:3000'
-                : 'https://client-sure-frontend.vercel.app';
+              const frontendUrl = "${frontendUrl}";
+
               window.location.href = frontendUrl + '/user/profile/tokens?purchase=error';
             }
           }
@@ -126,8 +132,8 @@ router.get('/dummy-token-checkout', async (req, res) => {
 
     res.send(html);
   } catch (error) {
-    console.error('Dummy checkout error:', error);
-    res.status(500).send('Internal server error');
+    console.error("Dummy checkout error:", error);
+    res.status(500).send("Internal server error");
   }
 });
 
