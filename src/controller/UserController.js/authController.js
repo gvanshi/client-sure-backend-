@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { uploadToImageKit } from "../../config/imagekit.js";
-import { User, Session } from "../../models/index.js";
+import { User, Session, Admin } from "../../models/index.js";
 import Resource from "../../models/Resource.js";
 import {
   createTransporter,
@@ -185,6 +185,61 @@ export const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
     }
+
+    // --------------------------------------------
+    // ADMIN CHECK
+    // --------------------------------------------
+    const admin = await Admin.findOne({ email: email.toLowerCase() });
+
+    if (admin) {
+      // Check admin password
+      const isValidAdminPassword = await bcrypt.compare(
+        password,
+        admin.passwordHash
+      );
+      if (isValidAdminPassword) {
+        // Generate Admin Token
+        const token = jwt.sign(
+          {
+            username: admin.name,
+            userId: admin._id,
+            role: "admin",
+            email: admin.email,
+          },
+          process.env.JWT_SECRET,
+          { expiresIn: "24h" }
+        );
+
+        // Set HttpOnly cookie for admin (if used)
+        res.cookie("adminToken", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "strict",
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        console.log(`Admin logged in: ${admin.email}`);
+
+        return res.json({
+          message: "Admin login successful",
+          role: "admin",
+          userToken: token, // Returning as userToken to match frontend expectations or generic token field
+          token: token,
+          user: {
+            id: admin._id,
+            name: admin.name,
+            email: admin.email,
+            role: "admin",
+          },
+        });
+      }
+      // If admin found but password invalid, return error immediately
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // --------------------------------------------
+    // USER CHECK (If not Admin)
+    // --------------------------------------------
 
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() }).populate(
