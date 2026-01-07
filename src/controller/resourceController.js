@@ -1,29 +1,49 @@
-import { User, Resource } from '../models/index.js';
-import { sendRepurchaseEmail } from '../utils/emailUtils.js';
+import { User, Resource } from "../models/index.js";
+import { sendRepurchaseEmail } from "../utils/emailUtils.js";
 
 // GET /api/resources - Get all available resources
 export const getResources = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const resources = await Resource.find({ isActive: true }).sort({ createdAt: -1 });
-    
-    // Get user's accessed resources
-    const user = await User.findById(userId).select('accessedResources');
-    const accessedResourceIds = user?.accessedResources?.map(item => item.resourceId.toString()) || [];
-    
+    const { page = 1, limit = 10 } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get total count for pagination
+    const totalItems = await Resource.countDocuments({ isActive: true });
+
+    // Get paginated resources
+    const resources = await Resource.find({ isActive: true })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get user's accessed resources to check access status
+    const user = await User.findById(userId).select("accessedResources");
+    const accessedResourceIds =
+      user?.accessedResources?.map((item) => item.resourceId.toString()) || [];
+
     res.json({
-      resources: resources.map(resource => ({
+      resources: resources.map((resource) => ({
         id: resource._id,
         title: resource.title,
         type: resource.type,
         description: resource.description,
         thumbnailUrl: resource.thumbnailUrl,
-        isAccessedByUser: accessedResourceIds.includes(resource._id.toString())
-      }))
+        isAccessedByUser: accessedResourceIds.includes(resource._id.toString()),
+        createdAt: resource.createdAt,
+      })),
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalItems / limit),
+        totalItems: totalItems,
+        hasNext: skip + parseInt(limit) < totalItems,
+        hasPrev: parseInt(page) > 1,
+      },
     });
   } catch (error) {
-    console.error('Get resources error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Get resources error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -36,21 +56,21 @@ export const accessResource = async (req, res) => {
     // Find resource
     const resource = await Resource.findById(id);
     if (!resource || !resource.isActive) {
-      return res.status(404).json({ error: 'Resource not found' });
+      return res.status(404).json({ error: "Resource not found" });
     }
 
     // Find user with current token count
-    const user = await User.findById(userId).populate('subscription.planId');
+    const user = await User.findById(userId).populate("subscription.planId");
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Check if subscription is active
     const now = new Date();
     if (!user.subscription.endDate || user.subscription.endDate < now) {
-      return res.status(403).json({ 
-        error: 'Subscription expired',
-        needsRenewal: true 
+      return res.status(403).json({
+        error: "Subscription expired",
+        needsRenewal: true,
       });
     }
 
@@ -60,18 +80,20 @@ export const accessResource = async (req, res) => {
     }
     user.accessedResources.unshift({
       resourceId: resource._id,
-      accessedAt: new Date()
+      accessedAt: new Date(),
     });
-    
+
     // Keep only last 100 accessed resources
     if (user.accessedResources.length > 100) {
       user.accessedResources = user.accessedResources.slice(0, 100);
     }
-    
+
     await user.save();
 
     // Log access
-    console.log(`Resource accessed: ${resource.title} by ${user.email}, tokens remaining: ${user.tokens}`);
+    console.log(
+      `Resource accessed: ${resource.title} by ${user.email}, tokens remaining: ${user.tokens}`
+    );
 
     // Check if monthly tokens are low and send repurchase email
     if (user.monthlyTokensRemaining <= 100) {
@@ -80,36 +102,35 @@ export const accessResource = async (req, res) => {
 
     // Return resource access data
     res.json({
-      message: 'Resource access granted',
+      message: "Resource access granted",
       resource: {
         id: resource._id,
         title: resource.title,
         type: resource.type,
         url: resource.url,
-        content: resource.content
+        content: resource.content,
       },
-      tokensRemaining: user.tokens
+      tokensRemaining: user.tokens,
     });
-
   } catch (error) {
-    console.error('Access resource error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Access resource error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
-
 
 // GET /api/resources/user/stats - Get user token stats
 export const getUserStats = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const user = await User.findById(userId).populate('subscription.planId');
+    const user = await User.findById(userId).populate("subscription.planId");
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     const now = new Date();
-    const isSubscriptionActive = user.subscription.endDate && user.subscription.endDate > now;
+    const isSubscriptionActive =
+      user.subscription.endDate && user.subscription.endDate > now;
 
     res.json({
       tokens: user.tokens,
@@ -119,20 +140,19 @@ export const getUserStats = async (req, res) => {
       monthlyTokens: {
         total: user.monthlyTokensTotal || 0,
         used: user.monthlyTokensUsed || 0,
-        remaining: user.monthlyTokensRemaining || 0
+        remaining: user.monthlyTokensRemaining || 0,
       },
       subscription: {
         isActive: isSubscriptionActive,
         planName: user.subscription.planId?.name,
         endDate: user.subscription.endDate,
         lastRefreshedAt: user.subscription.lastRefreshedAt,
-        monthlyAllocation: user.subscription.monthlyAllocation || 0
-      }
+        monthlyAllocation: user.subscription.monthlyAllocation || 0,
+      },
     });
-
   } catch (error) {
-    console.error('Get user stats error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Get user stats error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -144,7 +164,7 @@ export const getAccessedResources = async (req, res) => {
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Get accessed resources from user's access history
@@ -154,21 +174,25 @@ export const getAccessedResources = async (req, res) => {
     const paginatedResources = accessedResources.slice(startIndex, endIndex);
 
     // Get full resource details
-    const resourceIds = paginatedResources.map(item => item.resourceId);
+    const resourceIds = paginatedResources.map((item) => item.resourceId);
     const resources = await Resource.find({ _id: { $in: resourceIds } });
 
-    const result = paginatedResources.map(accessItem => {
-      const resource = resources.find(r => r._id.toString() === accessItem.resourceId.toString());
-      return {
-        id: resource?._id,
-        title: resource?.title,
-        type: resource?.type,
-        description: resource?.description,
+    const result = paginatedResources
+      .map((accessItem) => {
+        const resource = resources.find(
+          (r) => r._id.toString() === accessItem.resourceId.toString()
+        );
+        return {
+          id: resource?._id,
+          title: resource?.title,
+          type: resource?.type,
+          description: resource?.description,
 
-        accessedAt: accessItem.accessedAt,
-        thumbnailUrl: resource?.thumbnailUrl
-      };
-    }).filter(item => item.id); // Filter out deleted resources
+          accessedAt: accessItem.accessedAt,
+          thumbnailUrl: resource?.thumbnailUrl,
+        };
+      })
+      .filter((item) => item.id); // Filter out deleted resources
 
     res.json({
       resources: result,
@@ -177,13 +201,12 @@ export const getAccessedResources = async (req, res) => {
         totalPages: Math.ceil(accessedResources.length / limit),
         totalItems: accessedResources.length,
         hasNext: endIndex < accessedResources.length,
-        hasPrev: page > 1
-      }
+        hasPrev: page > 1,
+      },
     });
-
   } catch (error) {
-    console.error('Get accessed resources error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Get accessed resources error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -195,14 +218,15 @@ export const getResourceById = async (req, res) => {
 
     const resource = await Resource.findById(id);
     if (!resource || !resource.isActive) {
-      return res.status(404).json({ error: 'Resource not found' });
+      return res.status(404).json({ error: "Resource not found" });
     }
 
     // Check if user has accessed this resource
-    const user = await User.findById(userId).select('accessedResources');
-    const hasAccessed = user?.accessedResources?.some(item => 
-      item.resourceId.toString() === id
-    ) || false;
+    const user = await User.findById(userId).select("accessedResources");
+    const hasAccessed =
+      user?.accessedResources?.some(
+        (item) => item.resourceId.toString() === id
+      ) || false;
 
     res.json({
       id: resource._id,
@@ -213,11 +237,10 @@ export const getResourceById = async (req, res) => {
       thumbnailUrl: resource.thumbnailUrl,
       url: hasAccessed ? resource.url : null,
       content: hasAccessed ? resource.content : null,
-      isAccessedByUser: hasAccessed
+      isAccessedByUser: hasAccessed,
     });
-
   } catch (error) {
-    console.error('Get resource by ID error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Get resource by ID error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
