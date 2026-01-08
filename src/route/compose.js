@@ -3,32 +3,30 @@ import Response from "../models/Response.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { authenticateToken } from "../middleware/auth.js";
 import { User } from "../models/index.js";
+import {
+  validateStructuredInput,
+  compilePrompt,
+  estimateTokens,
+  detectSpamIndicators,
+} from "../services/promptCompiler.js";
 
 const router = express.Router();
 
-const languageMap = {
-  en: "English",
-  hi: "Hindi",
-  mr: "Marathi",
-  gu: "Gujarati",
-  pa: "Punjabi",
-  bn: "Bengali",
-  ta: "Tamil",
-  te: "Telugu",
-  kn: "Kannada",
-};
-
+/**
+ * POST /api/compose
+ * Production-grade AI content generation endpoint
+ * Accepts structured token-optimized input
+ */
 router.post("/", authenticateToken, async (req, res) => {
   const {
-    channel,
-    industry,
-    tone,
-    goal,
-    details,
-    language,
-    prompt: rawPrompt,
-    variants = 3,
+    data,
+    variants = 1,
+    expectJson = false,
+    // Legacy support for old format
+    prompt: legacyPrompt,
+    tool: legacyTool,
   } = req.body;
+
   const userId = req.user.userId;
 
   try {
@@ -54,6 +52,7 @@ router.post("/", authenticateToken, async (req, res) => {
         "gemini-1.0-pro",
         "gemini-pro",
       ];
+
       for (const modelName of models) {
         try {
           const model = genAI.getGenerativeModel({ model: modelName });
@@ -65,16 +64,169 @@ router.post("/", authenticateToken, async (req, res) => {
       throw new Error("All AI models failed");
     };
 
-    // Handle raw prompt from chatbot (Multi-variant generation)
-    if (rawPrompt) {
-      console.log(`Generating ${variants} variants for user ${userId}`);
+    // ============================================
+    // NEW: Structured Input (Production Format)
+    // ============================================
+    if (data) {
+      console.log(
+        `[Compose] Structured request for tool: ${data.tool}, variants: ${variants}`
+      );
+
+      // Validate structured input
+      const validationErrors = validateStructuredInput(data);
+      if (validationErrors.length > 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "Validation failed",
+          details: validationErrors,
+        });
+      }
+
+      // Compile optimized prompt
+      const compiledPrompt = compilePrompt(data, variants);
+      const tokenEstimate = estimateTokens(compiledPrompt);
+
+      console.log(`[Compile] Generated prompt (${tokenEstimate} tokens)`);
+      console.log(`[Compile] Preview:\n${compiledPrompt.substring(0, 200)}...`);
+
+      // Generate with LLM
+      const result = await generateWithFallback(compiledPrompt);
+      const aiText = result.response.text();
+
+      console.log(`[LLM] Response received (${aiText.length} chars)`);
+
+      // Parse response based on expectJson flag
+      let parsedVariants = [];
+
+      if (expectJson || data.tool === "emails") {
+        try {
+          let cleanedText = aiText.trim();
+
+          // Remove markdown code blocks
+          cleanedText = cleanedText
+            .replace(/```json\s*/gi, "")
+            .replace(/```\s*/g, "")
+            .trim();
+
+          // Remove any leading/trailing text before/after JSON
+          const jsonStart = cleanedText.search(/[\[{]/);
+          const jsonEnd = cleanedText.search(/[\]}]\s*$/);
+
+          if (jsonStart !== -1 && jsonEnd !== -1) {
+            cleanedText = cleanedText.substring(jsonStart, jsonEnd + 1);
+          }
+
+          // Try to parse
+          parsedVariants = JSON.parse(cleanedText);
+
+          // Ensure array format
+          if (!Array.isArray(parsedVariants)) {
+            parsedVariants = [parsedVariants];
+          }
+
+          // Validate structure for emails
+          if (data.tool === "emails") {
+            parsedVariants = parsedVariants.map((v) => ({
+              subject: String(v.subject || ""),
+              preview: String(v.preview || ""),
+              body: String(v.body || ""),
+            }));
+          }
+
+          console.log(
+            `[Parse] Successfully parsed ${parsedVariants.length} JSON variants`
+          );
+        } catch (parseError) {
+          console.error("[Parse] JSON parsing failed:", parseError.message);
+          console.error("[Parse] Raw AI response:", aiText.substring(0, 500));
+
+          // Fallback: Try to extract JSON objects manually
+          try {
+            const jsonMatches = aiText.match(
+              /\{[^{}]*"subject"[^{}]*"body"[^{}]*\}/g
+            );
+            if (jsonMatches && jsonMatches.length > 0) {
+              parsedVariants = jsonMatches
+                .map((match) => {
+                  try {
+                    return JSON.parse(match);
+                  } catch {
+                    return null;
+                  }
+                })
+                .filter(Boolean);
+
+              if (parsedVariants.length > 0) {
+                console.log(
+                  `[Parse] Recovered ${parsedVariants.length} variants using regex`
+                );
+              } else {
+                throw new Error("No valid JSON found");
+              }
+            } else {
+              throw new Error("No JSON pattern found");
+            }
+          } catch (fallbackError) {
+            console.error("[Parse] Fallback parsing also failed");
+            // Final fallback: return raw text as single variant
+            parsedVariants = [aiText];
+          }
+        }
+      } else {
+        // Plain text variants
+        // Try to split by common delimiters if multiple variants requested
+        if (variants > 1) {
+          const splits = aiText.split(/\n\n---\n\n|\n\nVariant \d+:?\n\n/i);
+          parsedVariants = splits.filter((s) => s.trim().length > 0);
+        } else {
+          parsedVariants = [aiText];
+        }
+      }
+
+      // Save to database
+      await Response.create({
+        channel: data.tool,
+        prompt: compiledPrompt,
+        aiText: aiText,
+        userId: userId,
+      });
+
+      // Deduct token
+      user.tokens -= 1;
+      if (typeof user.tokensUsedToday === "number") {
+        user.tokensUsedToday += 1;
+      }
+      if (typeof user.tokensUsedTotal === "number") {
+        user.tokensUsedTotal += 1;
+      }
+      await user.save();
+
+      return res.json({
+        ok: true,
+        variants: parsedVariants,
+        tokens: user.tokens,
+        meta: {
+          tool: data.tool,
+          promptTokens: tokenEstimate,
+          variantsGenerated: parsedVariants.length,
+        },
+      });
+    }
+
+    // ============================================
+    // LEGACY: Raw Prompt Support (Backward Compatibility)
+    // ============================================
+    if (legacyPrompt) {
+      console.log(
+        `[Legacy] Generating ${variants} variants for user ${userId}`
+      );
 
       const systemPrompt = `You are a helpful AI assistant.
-      Generate ${variants} distinct variations of the following content.
-      Return the response ONLY as a JSON array of strings, like: ["Variant 1 text...", "Variant 2 text...", "Variant 3 text..."].
-      Do not include any other text or markdown formatting outside the JSON array.
-      
-      Prompt: ${rawPrompt}`;
+Generate ${variants} distinct variations of the following content.
+Return the response ONLY as a JSON array of strings, like: ["Variant 1 text...", "Variant 2 text...", "Variant 3 text..."].
+Do not include any other text or markdown formatting outside the JSON array.
+
+Prompt: ${legacyPrompt}`;
 
       const result = await generateWithFallback(systemPrompt);
       const aiText = result.response.text();
@@ -87,29 +239,22 @@ router.post("/", authenticateToken, async (req, res) => {
           .trim();
         parsedVariants = JSON.parse(cleanedText);
       } catch (e) {
-        console.error(
-          "Failed to parse JSON variants, falling back to split:",
-          e
-        );
-        parsedVariants = [aiText]; // Fallback if parsing fails
+        console.error("Failed to parse JSON variants:", e);
+        parsedVariants = [aiText];
       }
 
-      // Ensure we have an array
       if (!Array.isArray(parsedVariants)) {
         parsedVariants = [String(parsedVariants)];
       }
 
-      // Save usage stats (Optional: log full prompt)
       await Response.create({
-        channel: "chatbot",
-        prompt: rawPrompt,
-        aiText: aiText, // Store raw response
-        userId: userId, // If schema supports it
+        channel: legacyTool || "chatbot",
+        prompt: legacyPrompt,
+        aiText: aiText,
+        userId: userId,
       });
 
-      // Deduct Token
       user.tokens -= 1;
-      // Update usage stats if exists
       if (typeof user.tokensUsedToday === "number") {
         user.tokensUsedToday += 1;
       }
@@ -121,57 +266,18 @@ router.post("/", authenticateToken, async (req, res) => {
         tokens: user.tokens,
       });
     }
-    const prompt = `
-आप एक विशेषज्ञ ${channel} संदेश कॉपीराइटर हैं।
 
-महत्वपूर्ण: केवल ${
-      languageMap[language] || "English"
-    } भाषा में उत्तर दें। कोई अन्य भाषा का उपयोग न करें।
-
-उद्योग: ${industry}
-टोन स्टाइल: ${tone}
-प्राथमिक लक्ष्य: ${goal}
-
-संदर्भ विवरण (वैकल्पिक, यदि सहायक हो):
-${JSON.stringify(details || {}, null, 2)}
-
-आपका कार्य:
-- एक अत्यधिक प्रभावी, मानव-ध्वनि वाला ${channel} संदेश लिखें।
-- इसे संक्षिप्त रखें (अधिकतम 3-4 पंक्तियाँ)।
-- इसे स्पष्ट, आकर्षक और लक्ष्य-उन्मुख बनाएं।
-- पूरे संदेश में चयनित टोन बनाए रखें।
-- मेटाडेटा (उद्योग, टोन, लक्ष्य, आदि) को आउटपुट में दोहराएं नहीं।
-- केवल अंतिम संदेश प्रदान करें, कोई स्पष्टीकरण नहीं।
-- सुनिश्चित करें कि पूरा उत्तर केवल ${
-      languageMap[language] || "English"
-    } भाषा में हो।
-`;
-
-    console.log("Generating content with prompt:", prompt);
-
-    const result = await generateWithFallback(prompt);
-    const aiText = result.response.text();
-
-    console.log("Gemini response:", aiText);
-
-    // Save in DB
-    await Response.create({
-      channel,
-      prompt,
-      aiText,
+    // No valid input provided
+    return res.status(400).json({
+      ok: false,
+      error:
+        "Invalid request format. Provide either 'data' (structured) or 'prompt' (legacy).",
     });
-
-    // Deduct Token for Compose tool as well (Assuming intended behavior)
-    user.tokens -= 1;
-    if (typeof user.tokensUsedToday === "number") {
-      user.tokensUsedToday += 1;
-    }
-    await user.save();
-
-    res.json({ ok: true, text: aiText, tokens: user.tokens });
   } catch (error) {
-    console.error("Gemini error:", error);
-    res.status(500).json({ ok: false, error: "AI request failed" });
+    console.error("[Compose] Error:", error);
+    res
+      .status(500)
+      .json({ ok: false, error: "AI request failed", details: error.message });
   }
 });
 
