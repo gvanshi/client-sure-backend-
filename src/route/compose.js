@@ -183,6 +183,28 @@ router.post("/", authenticateToken, async (req, res) => {
         }
       }
 
+      // Enforce exact variant count
+      if (parsedVariants.length > variants) {
+        // Too many variants - trim to requested count
+        console.log(
+          `[Parse] Trimming ${parsedVariants.length} variants to ${variants}`
+        );
+        parsedVariants = parsedVariants.slice(0, variants);
+      } else if (
+        parsedVariants.length < variants &&
+        parsedVariants.length > 0
+      ) {
+        // Too few variants - duplicate existing ones to reach requested count
+        console.log(
+          `[Parse] Padding ${parsedVariants.length} variants to ${variants}`
+        );
+        const original = [...parsedVariants];
+        while (parsedVariants.length < variants) {
+          const index = parsedVariants.length % original.length;
+          parsedVariants.push(original[index]);
+        }
+      }
+
       // Save to database
       await Response.create({
         channel: data.tool,
@@ -245,6 +267,26 @@ Prompt: ${legacyPrompt}`;
 
       if (!Array.isArray(parsedVariants)) {
         parsedVariants = [String(parsedVariants)];
+      }
+
+      // Enforce exact variant count
+      if (parsedVariants.length > variants) {
+        console.log(
+          `[Legacy] Trimming ${parsedVariants.length} variants to ${variants}`
+        );
+        parsedVariants = parsedVariants.slice(0, variants);
+      } else if (
+        parsedVariants.length < variants &&
+        parsedVariants.length > 0
+      ) {
+        console.log(
+          `[Legacy] Padding ${parsedVariants.length} variants to ${variants}`
+        );
+        const original = [...parsedVariants];
+        while (parsedVariants.length < variants) {
+          const index = parsedVariants.length % original.length;
+          parsedVariants.push(original[index]);
+        }
       }
 
       await Response.create({
