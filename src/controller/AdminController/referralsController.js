@@ -289,3 +289,108 @@ export const getReferrerDetails = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch referrer details' });
   }
 };
+
+// GET /api/admin/referrals/referred-user/:id
+export const getReferredUserDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id)
+      .populate('referredBy', 'name email referralCode')
+      .populate('subscription.planId', 'name price')
+      .select('name email phone referredBy subscription tokens dailyTokens prizeTokens milestoneRewards referralCode referralStats referrals createdAt updatedAt');
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Check if user has temporary tokens
+    const now = new Date();
+    let hasActiveTokens = false;
+    let temporaryTokens = null;
+
+    if (user.prizeTokens?.amount > 0 && user.prizeTokens?.expiresAt > now) {
+      hasActiveTokens = true;
+      const timeLeft = user.prizeTokens.expiresAt - now;
+      const daysLeft = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+      const hoursLeft = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      
+      temporaryTokens = {
+        amount: user.prizeTokens.amount,
+        grantedAt: user.prizeTokens.grantedAt,
+        expiresAt: user.prizeTokens.expiresAt,
+        prizeType: user.prizeTokens.prizeType,
+        timeUntilExpiry: daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h`
+      };
+    }
+
+    // Get user's referral details if they have referred anyone
+    const referredUsers = await User.find({ referredBy: user._id })
+      .select('name email subscription createdAt')
+      .populate('subscription.planId', 'name price')
+      .sort({ createdAt: -1 });
+
+    const formattedReferrals = referredUsers.map(ref => ({
+      _id: ref._id,
+      name: ref.name,
+      email: ref.email,
+      subscription: {
+        planName: ref.subscription.planId?.name || 'No Plan',
+        isActive: ref.subscription.isActive,
+        endDate: ref.subscription.endDate
+      },
+      joinedAt: ref.createdAt
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          referralCode: user.referralCode,
+          joinedAt: user.createdAt,
+          lastUpdated: user.updatedAt
+        },
+        referredBy: user.referredBy ? {
+          name: user.referredBy.name,
+          email: user.referredBy.email,
+          referralCode: user.referredBy.referralCode
+        } : null,
+        subscription: {
+          planName: user.subscription.planId?.name || 'No Plan',
+          planPrice: user.subscription.planId?.price || 0,
+          isActive: user.subscription.isActive,
+          startDate: user.subscription.startDate,
+          endDate: user.subscription.endDate
+        },
+        tokens: {
+          available: user.tokens || 0,
+          dailyTokens: user.dailyTokens || 0,
+          prizeTokens: user.prizeTokens?.amount || 0,
+          hasActiveTokens,
+          temporaryTokens
+        },
+        milestoneRewards: {
+          referral8Cycles: user.milestoneRewards?.referral8Cycles || 0,
+          referral15Cycles: user.milestoneRewards?.referral15Cycles || 0,
+          referral25Cycles: user.milestoneRewards?.referral25Cycles || 0,
+          totalTokensEarned: user.milestoneRewards?.totalTokensEarned || 0,
+          referral8LastReset: user.milestoneRewards?.referral8LastReset,
+          referral15LastReset: user.milestoneRewards?.referral15LastReset,
+          referral25LastReset: user.milestoneRewards?.referral25LastReset
+        },
+        referralStats: {
+          totalReferrals: user.referralStats?.totalReferrals || 0,
+          activeReferrals: user.referralStats?.activeReferrals || 0
+        },
+        referredUsers: formattedReferrals
+      }
+    });
+  } catch (error) {
+    console.error('Get referred user details error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch user details' });
+  }
+};
