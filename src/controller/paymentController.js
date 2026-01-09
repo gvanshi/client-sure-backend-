@@ -8,6 +8,7 @@ import {
   validateReferralCode,
   updateReferralStats,
 } from "../utils/referralUtils.js";
+import * as phonepeService from "../services/phonepeService.js";
 
 // Setup nodemailer transporter
 const transporter = createTransporter();
@@ -191,60 +192,102 @@ export const createOrder = async (req, res) => {
     // Create local Order with pending status - use actual plan price
     const clientOrderId = new mongoose.Types.ObjectId().toString();
     console.log("Creating order with amount:", plan.price);
+    
     const order = await Order.create({
       clientOrderId: clientOrderId,
-      providerOrderId: `dummy_${clientOrderId}`,
+      providerOrderId: `pending_${clientOrderId}`, // Placeholder, will be updated by PhonePe
       userEmail: email.toLowerCase().trim(),
       userName: name.trim(),
       planId: plan._id,
+      userId: user._id, // Link order to user
       amount: plan.price, // Always use plan price from database
       status: "pending",
+      paymentStatus: "pending",
       type: "subscription",
       referralCode: referralCode || null,
     });
     console.log("Order created with amount:", order.amount);
 
-    // Create payment payload with dynamic URL
-    const baseUrl =
-      process.env.BACKEND_URL ||
-      (process.env.NODE_ENV === "production"
-        ? process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : "https://client-sure-backend.vercel.app"
-        : `http://localhost:${process.env.PORT || 5000}`);
+    // Create payment in PhonePe
+    try {
+      // Generate merchant order ID
+      const merchantOrderId = phonepeService.generateMerchantOrderId('SUB');
+      
+      // Convert amount to paisa
+      const amountInPaisa = phonepeService.rupeesToPaisa(plan.price);
+      
+      // Create payment in PhonePe
+      const paymentData = {
+        merchantOrderId,
+        amount: amountInPaisa,
+        redirectUrl: `${process.env.FRONTEND_URL}/payment-success?orderId=${order._id}`,
+        metaInfo: {
+          udf1: order._id.toString(),
+          udf2: 'subscription',
+          udf3: referralCode || ''
+        },
+        expireAfter: 900 // 15 minutes
+      };
+      
+      const paymentResponse = await phonepeService.createPayment(paymentData);
+      
+      // Update order with PhonePe details
+      order.merchantOrderId = merchantOrderId;
+      order.phonePeOrderId = paymentResponse.orderId;
+      order.providerOrderId = paymentResponse.orderId;
+      await order.save();
+      
+      const paymentPayload = {
+        checkoutUrl: paymentResponse.redirectUrl,
+        redirectUrl: paymentResponse.redirectUrl,
+        orderId: paymentResponse.orderId,
+        merchantOrderId: merchantOrderId,
+        state: paymentResponse.state,
+        orderAmount: plan.price,
+        userEmail: email.toLowerCase().trim(),
+        userName: name.trim(),
+      };
+      
+      console.log(`Order created with PhonePe: ${order.clientOrderId}, PhonePe Order: ${paymentResponse.orderId}`);
+      
+      // Return response
+      res.json({
+        success: true,
+        orderId: order.clientOrderId,
+        clientOrderId: order.clientOrderId,
+        _id: order._id, // MongoDB ID for tracking
+        paymentPayload: paymentPayload,
+        payload: paymentPayload,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          isNewUser: !(await User.findOne({
+            email: email.toLowerCase(),
+            createdAt: { $lt: user.createdAt },
+          })),
+        },
+      });
+    } catch (phonepeError) {
+      console.error('PhonePe payment creation failed:', phonepeError);
+      
+      // Delete the order if payment creation fails
+      await Order.findByIdAndDelete(order._id);
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create payment. Please try again.',
+        details: phonepeError.message
+      });
+    }
 
-    const paymentPayload = {
-      checkoutUrl: `${baseUrl}/dummy-checkout?order=${order.clientOrderId}`,
-      checkoutToken: `dummy-token-${Date.now()}`,
-      orderAmount: plan.price,
-      userEmail: email.toLowerCase().trim(),
-      userName: name.trim(),
-    };
-
-    console.log(`Order created: ${order.clientOrderId} for ${email}`);
-
-    // Return response
-    res.json({
-      success: true,
-      orderId: order.clientOrderId,
-      clientOrderId: order.clientOrderId,
-      paymentPayload: paymentPayload,
-      payload: paymentPayload,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        isNewUser: !(await User.findOne({
-          email: email.toLowerCase(),
-          createdAt: { $lt: user.createdAt },
-        })),
-      },
-    });
   } catch (error) {
     console.error("Create order error:", error);
     res.status(500).json({
+      success: false,
       error: "Internal server error",
+      details: error.message
     });
   }
 };

@@ -15,8 +15,8 @@ const tokenTransactionSchema = new mongoose.Schema(
     },
     transactionId: {
       type: String,
-      required: true,
-      unique: true,
+      required: false, // Made optional for PhonePe integration
+      sparse: true,
       index: true,
     },
     type: {
@@ -49,6 +49,37 @@ const tokenTransactionSchema = new mongoose.Schema(
         default: "razorpay",
       },
     },
+    // PhonePe specific fields
+    merchantOrderId: {
+      type: String,
+      required: false,
+      sparse: true,
+      index: true
+    },
+    phonePeOrderId: {
+      type: String,
+      required: false
+    },
+    phonePeTransactionId: {
+      type: String,
+      required: false
+    },
+    paymentMode: {
+      type: String,
+      required: false // UPI_QR, UPI_INTENT, CARD, etc.
+    },
+    paymentRail: {
+      type: mongoose.Schema.Types.Mixed,
+      required: false // UPI details, card details, etc.
+    },
+    failureReason: {
+      type: String,
+      required: false
+    },
+    completedAt: {
+      type: Date,
+      required: false
+    },
     metadata: {
       userAgent: String,
       ipAddress: String,
@@ -60,11 +91,11 @@ const tokenTransactionSchema = new mongoose.Schema(
     },
     balanceBefore: {
       type: Number,
-      required: true,
+      required: false, // Made optional
     },
     balanceAfter: {
       type: Number,
-      required: true,
+      required: false, // Made optional
     },
   },
   {
@@ -75,6 +106,7 @@ const tokenTransactionSchema = new mongoose.Schema(
 // Compound indexes for efficient queries
 tokenTransactionSchema.index({ userId: 1, createdAt: -1 });
 tokenTransactionSchema.index({ status: 1, createdAt: -1 });
+tokenTransactionSchema.index({ merchantOrderId: 1 });
 
 // Auto-expire tokens after 24 hours (TTL index)
 tokenTransactionSchema.index(

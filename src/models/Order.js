@@ -27,11 +27,21 @@ const orderSchema = new mongoose.Schema({
     ref: 'Plan',
     required: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
   amount: {
     type: Number,
     required: true
   },
   status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'cancelled'],
+    default: 'pending'
+  },
+  paymentStatus: {
     type: String,
     enum: ['pending', 'completed', 'failed', 'cancelled'],
     default: 'pending'
@@ -45,6 +55,37 @@ const orderSchema = new mongoose.Schema({
     type: String,
     required: false,
     trim: true
+  },
+  // PhonePe specific fields
+  merchantOrderId: {
+    type: String,
+    required: false,
+    sparse: true,
+    index: true
+  },
+  phonePeOrderId: {
+    type: String,
+    required: false
+  },
+  phonePeTransactionId: {
+    type: String,
+    required: false
+  },
+  paymentMode: {
+    type: String,
+    required: false // UPI_QR, UPI_INTENT, CARD, etc.
+  },
+  paymentRail: {
+    type: mongoose.Schema.Types.Mixed,
+    required: false // UPI details, card details, etc.
+  },
+  failureReason: {
+    type: String,
+    required: false
+  },
+  completedAt: {
+    type: Date,
+    required: false
   }
 }, {
   timestamps: true
@@ -54,5 +95,6 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ merchantOrderId: 1 });
 
 export default mongoose.model('Order', orderSchema);

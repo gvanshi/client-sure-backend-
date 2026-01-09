@@ -92,24 +92,39 @@ export const getAccessedResourceById = async (req, res) => {
 export const getAllResources = async (req, res) => {
   try {
     console.log('🔍 getAllResources called');
+    const userId = req.user.id;
     
-    // First get all resources for debugging
-    const allResources = await Resource.find({})
+    // Get user's accessed resources
+    const user = await User.findById(userId).select('accessedResources');
+    const accessedResourceIds = user?.accessedResources?.map(item => item.resourceId.toString()) || [];
+    
+    // Get all active resources
+    const allResources = await Resource.find({ isActive: { $ne: false } })
       .select('title description type url thumbnailUrl createdAt isActive')
       .sort({ createdAt: -1 });
     
-    console.log('📊 Total resources in DB:', allResources.length);
-    console.log('📊 Resources data:', allResources.map(r => ({ 
+    console.log('📊 Total active resources:', allResources.length);
+    console.log('📊 User accessed resources:', accessedResourceIds.length);
+    
+    // Add isAccessedByUser field to each resource
+    const resourcesWithAccessInfo = allResources.map(resource => ({
+      _id: resource._id,
+      title: resource.title,
+      description: resource.description,
+      type: resource.type,
+      url: resource.url,
+      thumbnailUrl: resource.thumbnailUrl,
+      createdAt: resource.createdAt,
+      isActive: resource.isActive,
+      isAccessedByUser: accessedResourceIds.includes(resource._id.toString())
+    }));
+    
+    console.log('✅ Resources with access info:', resourcesWithAccessInfo.map(r => ({ 
       title: r.title, 
-      isActive: r.isActive,
-      createdAt: r.createdAt 
+      isAccessedByUser: r.isAccessedByUser 
     })));
     
-    // Filter active resources
-    const activeResources = allResources.filter(r => r.isActive !== false);
-    console.log('✅ Active resources:', activeResources.length);
-    
-    res.json(activeResources);
+    res.json(resourcesWithAccessInfo);
   } catch (error) {
     console.error('❌ getAllResources error:', error);
     res.status(500).json({ error: error.message });

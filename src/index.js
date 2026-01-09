@@ -4,7 +4,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import dbConnect from "./config/db.js";
 import paymentsRoute from "./route/payments.js";
-import dummyCheckoutRoute from "./route/dummyCheckout.js";
+// import dummyCheckoutRoute from "./route/dummyCheckout.js"; // DISABLED - Using PhonePe
+import phonepeRoute from "./route/phonepe.js";
 import authRoute from "./route/auth.js";
 import userRoute from "./route/user.js";
 import adminRoute from "./route/admin.js";
@@ -15,7 +16,7 @@ import notificationsRoute from "./route/notifications.js";
 import referralsRoute from "./route/referrals.js";
 import composeRoute from "./route/compose.js";
 import tokensRoute from "./route/tokens.js";
-import dummyTokenCheckoutRoute from "./route/dummyTokenCheckout.js";
+// import dummyTokenCheckoutRoute from "./route/dummyTokenCheckout.js"; // DISABLED - Using PhonePe
 import {
   startTokenRefreshCron,
   startSubscriptionExpiryCron,
@@ -143,6 +144,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/payments", paymentsRoute);
+app.use("/api/phonepe", phonepeRoute); // PhonePe payment gateway
 app.use("/api/auth", authRoute);
 app.use("/api/user", userRoute);
 app.use("/api/admin", adminRoute);
@@ -154,8 +156,10 @@ app.use("/api/referrals", referralsRoute);
 app.use("/api/compose", composeRoute);
 app.use("/api/tokens", tokensRoute);
 
-app.use("/", dummyCheckoutRoute);
-app.use("/api", dummyTokenCheckoutRoute);
+// Dummy checkout routes - DISABLED (PhonePe is now the primary payment gateway)
+// Uncomment these if you need to temporarily revert to dummy checkout
+// app.use("/", dummyCheckoutRoute);
+// app.use("/api", dummyTokenCheckoutRoute);
 
 app.listen(PORT, () => {
   console.log(`🚀 ClientSure Server is running on port ${PORT}`);
