@@ -36,11 +36,9 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5000", // Add backend localhost for dummy checkout
   "http://localhost:5173",
-  "https://client-sure-frontend.vercel.app",
+  "https://client-sure-frontened.vercel.app",
   "https://client-sure-backend.vercel.app", // Add backend production URL
   process.env.BASE_URL,
-  // Add any preview deployments
-  "https://client-sure-frontend-git-main-ysatyam129s-projects.vercel.app",
 ].filter(Boolean);
 
 // Log allowed origins for debugging
