@@ -167,7 +167,8 @@ export const deletePost = async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    if (post.user_id.toString() !== userId) {
+    // Convert both to strings for comparison
+    if (post.user_id.toString() !== userId.toString()) {
       return res
         .status(403)
         .json({ message: "You can only delete your own posts" });
@@ -234,6 +235,52 @@ export const deletePost = async (req, res) => {
       .json({ message: "Error deleting post", error: error.message });
   }
 };
+
+// Update own post
+export const updatePost = async (req, res) => {
+  try {
+    const { postId } = req.params
+    const { post_title, description } = req.body
+    const userId = req.user.id
+
+    const post = await Feedback.findById(postId)
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' })
+    }
+
+    if (post.user_id.toString() !== userId.toString()) {
+      return res.status(403).json({ message: 'You can only edit your own posts' })
+    }
+
+    if (post_title !== undefined) post.post_title = post_title
+    if (description !== undefined) post.description = description
+
+    // Handle new image upload
+    if (req.file) {
+      try {
+        const uploadResult = await uploadToImageKitCommunity(req.file)
+        post.image = uploadResult.url
+      } catch (uploadError) {
+        console.error('ImageKit upload error:', uploadError)
+        return res.status(500).json({ success: false, message: 'Error uploading image', error: uploadError.message })
+      }
+    }
+
+    post.updatedAt = new Date()
+    const saved = await post.save()
+
+    // Populate user and comments user data for consistent response
+    await Feedback.populate(saved, [
+      { path: 'user_id', select: 'name avatar' },
+      { path: 'comments.user_id', select: 'name avatar' },
+    ])
+
+    res.json({ success: true, message: 'Post updated successfully', post: saved })
+  } catch (error) {
+    console.error('Error updating post:', error)
+    res.status(500).json({ message: 'Error updating post', error: error.message })
+  }
+}
 
 // Like post
 export const likePost = async (req, res) => {
@@ -411,7 +458,7 @@ export const addComment = async (req, res) => {
     const remainingLimits = await getRemainingLimits(userId);
 
     // Notify post owner about new comment (if not commenting on own post)
-    if (post.user_id.toString() !== userId) {
+    if (post.user_id.toString() !== userId.toString()) {
       const commenter = await User.findById(userId).select("name");
       const message = `${commenter.name} commented on your post: "${post.post_title}"`;
       createNotification(
@@ -450,7 +497,7 @@ export const deleteComment = async (req, res) => {
     }
 
     const comment = post.comments.id(commentId);
-    if (comment.user_id.toString() !== userId) {
+    if (comment.user_id.toString() !== userId.toString()) {
       return res
         .status(403)
         .json({ message: "You can only delete your own comments" });

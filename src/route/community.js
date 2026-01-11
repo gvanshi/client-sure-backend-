@@ -4,6 +4,7 @@ import { communityUpload } from '../middleware/communityUpload.js';
 import {
   createPost,
   deletePost,
+  updatePost,
   likePost,
   unlikePost,
   addComment,
@@ -34,6 +35,9 @@ router.post('/comment/:postId', authenticateToken, addComment);
 
 // DELETE /api/community/comment/:commentId
 router.delete('/comment/:commentId', authenticateToken, deleteComment);
+
+// UPDATE /api/community/post/:postId (with optional image)
+router.put('/post/:postId', authenticateToken, communityUpload.single('image'), updatePost);
 
 // GET /api/community/posts (with search)
 router.get('/posts', authenticateToken, getAllPosts);

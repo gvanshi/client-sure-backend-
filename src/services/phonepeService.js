@@ -260,7 +260,8 @@ const checkOrderStatus = async (merchantOrderId, includeDetails = true, includeE
 
 /**
  * Verify PhonePe webhook signature
- * PhonePe sends: Authorization: SHA256 <base64(SHA256(username:password))>
+ * PhonePe sends: Authorization: SHA256(username:password)
+ * The hash can be in hex or base64 format depending on PhonePe's implementation
  * 
  * @param {string} authHeader - Authorization header from webhook request
  * 
@@ -268,25 +269,44 @@ const checkOrderStatus = async (merchantOrderId, includeDetails = true, includeE
  */
 const verifyWebhookSignature = (authHeader) => {
   try {
-    if (!authHeader || !authHeader.startsWith('SHA256 ')) {
-      console.warn('Invalid webhook authorization header format');
+    if (!authHeader) {
+      console.warn('Missing webhook authorization header');
       return false;
     }
 
-    // Extract the hash from header
-    const receivedHash = authHeader.replace('SHA256 ', '');
+    // PhonePe can send the hash with or without "SHA256 " prefix
+    // Extract the hash, removing any prefix
+    const receivedHash = authHeader.replace(/^SHA256\s+/i, '').trim();
 
-    // Generate expected hash
+    // Generate expected hash: SHA256(username:password)
     const credentials = `${process.env.PHONEPE_WEBHOOK_USERNAME}:${process.env.PHONEPE_WEBHOOK_PASSWORD}`;
-    const expectedHash = crypto
+    
+    // Try both hex and base64 encodings as PhonePe documentation isn't clear
+    const expectedHashHex = crypto
+      .createHash('sha256')
+      .update(credentials)
+      .digest('hex');
+    
+    const expectedHashBase64 = crypto
       .createHash('sha256')
       .update(credentials)
       .digest('base64');
 
-    const isValid = receivedHash === expectedHash;
+    const isValidHex = receivedHash.toLowerCase() === expectedHashHex.toLowerCase();
+    const isValidBase64 = receivedHash === expectedHashBase64;
+    const isValid = isValidHex || isValidBase64;
     
     if (!isValid) {
-      console.warn('Webhook signature verification failed');
+      console.warn('Webhook signature verification failed', {
+        receivedLength: receivedHash.length,
+        receivedPrefix: receivedHash.substring(0, 10),
+        expectedHexPrefix: expectedHashHex.substring(0, 10),
+        expectedBase64Prefix: expectedHashBase64.substring(0, 10)
+      });
+    } else {
+      console.log('Webhook signature verified successfully', {
+        encoding: isValidHex ? 'hex' : 'base64'
+      });
     }
     
     return isValid;

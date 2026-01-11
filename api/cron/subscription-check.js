@@ -1,8 +1,10 @@
 import { manualSubscriptionCheck } from '../../src/services/cronJobs.js';
 
 export default async function handler(req, res) {
-  // Verify this is a cron request
-  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Authorize either via a CRON secret header or Vercel scheduled request header
+  const isVercelCron = req.headers['x-vercel-cron'] || req.headers['x-vercel-cron'] === '1'
+  const hasValidAuth = req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`
+  if (!hasValidAuth && !isVercelCron) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
