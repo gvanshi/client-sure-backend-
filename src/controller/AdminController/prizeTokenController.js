@@ -1,33 +1,46 @@
-import User from '../../models/User.js';
-import { calculateEffectiveTokens, cleanExpiredTokens } from '../../utils/tokenUtils.js';
-import { createNotification } from '../../utils/notificationUtils.js';
+import User from "../../models/User.js";
+import {
+  calculateEffectiveTokens,
+  cleanExpiredTokens,
+} from "../../utils/tokenUtils.js";
+import { createNotification } from "../../utils/notificationUtils.js";
+
+import Admin from "../../models/Admin.js";
+import PrizeDistribution from "../../models/PrizeDistribution.js";
 
 // Award prize tokens to user
 export const awardPrizeTokens = async (req, res) => {
   try {
-    const { userId, tokenAmount, prizeType } = req.body;
-    const adminUsername = req.admin?.username || 'admin';
+    const { userId, tokenAmount, prizeType, position } = req.body;
+    const adminUsername = req.admin?.username || "admin";
+
+    // Get Admin ID: verify if it's in the token, otherwise find by username
+    let adminId = req.admin?.id;
+    if (!adminId) {
+      const admin = await Admin.findOne({ username: adminUsername });
+      if (admin) adminId = admin._id;
+    }
 
     // Validate input
     if (!userId || !tokenAmount || !prizeType) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userId, tokenAmount, prizeType' 
+        error: "Missing required fields: userId, tokenAmount, prizeType",
       });
     }
 
     if (tokenAmount <= 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        error: 'Token amount must be greater than 0' 
+        error: "Token amount must be greater than 0",
       });
     }
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: 'User not found' 
+        error: "User not found",
       });
     }
 
@@ -35,17 +48,21 @@ export const awardPrizeTokens = async (req, res) => {
     await cleanExpiredTokens(user);
 
     // Check if user already has active prize tokens
-    if (user.temporaryTokens && user.temporaryTokens.amount > 0 && user.temporaryTokens.expiresAt) {
+    if (
+      user.temporaryTokens &&
+      user.temporaryTokens.amount > 0 &&
+      user.temporaryTokens.expiresAt
+    ) {
       const now = new Date();
       const expiryTime = new Date(user.temporaryTokens.expiresAt);
-      
+
       if (now <= expiryTime) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           success: false,
-          error: 'User already has active prize tokens',
+          error: "User already has active prize tokens",
           currentTokens: user.temporaryTokens.amount,
           expiresAt: user.temporaryTokens.expiresAt,
-          prizeType: user.temporaryTokens.prizeType
+          prizeType: user.temporaryTokens.prizeType,
         });
       }
     }
@@ -59,33 +76,61 @@ export const awardPrizeTokens = async (req, res) => {
       grantedAt: now,
       expiresAt: expiryTime,
       grantedBy: adminUsername,
-      prizeType: prizeType
+      prizeType: prizeType,
     };
 
     await user.save();
+
+    // Create PrizeDistribution record if we have adminId and valid position
+    if (adminId && position && [1, 2, 3].includes(position)) {
+      try {
+        await PrizeDistribution.create({
+          userId: user._id,
+          position: position,
+          tokenAmount: tokenAmount,
+          period: "custom", // Treating manual single awards as custom/ad-hoc
+          dateRange: {
+            start: now,
+            end: now,
+          },
+          awardedAt: now,
+          awardedBy: adminId,
+          notificationSent: true, // We are sending notification below
+          contestName: `Individual Award - ${prizeType}`,
+        });
+        console.log("✅ PrizeDistribution record created");
+      } catch (distError) {
+        console.error("Error creating PrizeDistribution record:", distError);
+        // Don't fail the main request
+      }
+    }
 
     // Create notification for user
     try {
       const notificationMessage = `🎉 You have been rewarded ${tokenAmount} tokens as ${prizeType}! Valid for 24 hours.`;
       const notificationCreated = await createNotification(
         user._id,
-        'prize_tokens_awarded',
+        "prize_tokens_awarded",
         notificationMessage,
         null, // No specific post ID
-        null  // System notification
+        null // System notification
       );
-      
+
       if (notificationCreated) {
-        console.log(`✅ Notification successfully sent to ${user.email} for prize tokens`);
+        console.log(
+          `✅ Notification successfully sent to ${user.email} for prize tokens`
+        );
       } else {
         console.log(`❌ Failed to send notification to ${user.email}`);
       }
     } catch (notificationError) {
-      console.error('Error creating notification:', notificationError);
+      console.error("Error creating notification:", notificationError);
       // Don't fail the main operation if notification fails
     }
 
-    console.log(`✅ Prize tokens awarded: ${tokenAmount} ${prizeType} tokens to ${user.email} by ${adminUsername}`);
+    console.log(
+      `✅ Prize tokens awarded: ${tokenAmount} ${prizeType} tokens to ${user.email} by ${adminUsername}`
+    );
 
     res.json({
       success: true,
@@ -95,18 +140,18 @@ export const awardPrizeTokens = async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
-        email: user.email
+        email: user.email,
       },
       notification: {
         sent: true,
-        message: `Prize tokens notification sent to ${user.email}`
-      }
+        message: `Prize tokens notification sent to ${user.email}`,
+      },
     });
   } catch (error) {
-    console.error('Award prize tokens error:', error);
-    res.status(500).json({ 
+    console.error("Award prize tokens error:", error);
+    res.status(500).json({
       success: false,
-      error: 'Failed to award prize tokens' 
+      error: "Failed to award prize tokens",
     });
   }
 };
@@ -118,9 +163,9 @@ export const getUserTokenStatus = async (req, res) => {
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: 'User not found' 
+        error: "User not found",
       });
     }
 
@@ -128,10 +173,13 @@ export const getUserTokenStatus = async (req, res) => {
     await cleanExpiredTokens(user);
 
     const effectiveTokens = calculateEffectiveTokens(user);
-    
+
     let timeRemaining = 0;
     if (user.temporaryTokens && user.temporaryTokens.expiresAt) {
-      timeRemaining = Math.max(0, new Date(user.temporaryTokens.expiresAt) - new Date());
+      timeRemaining = Math.max(
+        0,
+        new Date(user.temporaryTokens.expiresAt) - new Date()
+      );
     }
 
     res.json({
@@ -142,16 +190,16 @@ export const getUserTokenStatus = async (req, res) => {
         grantedAt: user.temporaryTokens?.grantedAt,
         expiresAt: user.temporaryTokens?.expiresAt,
         grantedBy: user.temporaryTokens?.grantedBy,
-        prizeType: user.temporaryTokens?.prizeType
+        prizeType: user.temporaryTokens?.prizeType,
       },
       effectiveTokens,
-      timeRemaining
+      timeRemaining,
     });
   } catch (error) {
-    console.error('Get user token status error:', error);
-    res.status(500).json({ 
+    console.error("Get user token status error:", error);
+    res.status(500).json({
       success: false,
-      error: 'Failed to fetch token status' 
+      error: "Failed to fetch token status",
     });
   }
 };

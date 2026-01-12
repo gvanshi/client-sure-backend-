@@ -309,6 +309,10 @@ export const login = async (req, res) => {
       lastActiveAt: new Date(),
     });
 
+    // Update lastLogin timestamp
+    user.lastLogin = new Date();
+    await user.save();
+
     await newSession.save();
     console.log(
       `✅ New session created for ${user.email} (sessionId: ${sessionId})`

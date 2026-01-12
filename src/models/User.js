@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
     passwordHash: {
       type: String,
       required: false, // Will be set after email verification
