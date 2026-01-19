@@ -143,7 +143,7 @@ export const register = async (req, res) => {
         email: user.email,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     console.log(`New user registered: ${user.email}`);
@@ -195,7 +195,7 @@ export const login = async (req, res) => {
       // Check admin password
       const isValidAdminPassword = await bcrypt.compare(
         password,
-        admin.passwordHash
+        admin.passwordHash,
       );
       if (isValidAdminPassword) {
         // Generate Admin Token
@@ -207,7 +207,7 @@ export const login = async (req, res) => {
             email: admin.email,
           },
           process.env.JWT_SECRET,
-          { expiresIn: "24h" }
+          { expiresIn: "24h" },
         );
 
         // Set HttpOnly cookie for admin (if used)
@@ -243,7 +243,7 @@ export const login = async (req, res) => {
 
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() }).populate(
-      "subscription.planId"
+      "subscription.planId",
     );
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -280,7 +280,7 @@ export const login = async (req, res) => {
       .exec();
 
     console.log(
-      `User ${user.email} has ${existingSessions.length} active session(s)`
+      `User ${user.email} has ${existingSessions.length} active session(s)`,
     );
 
     // 2. If user already has 2 or more sessions, delete the oldest one
@@ -288,7 +288,7 @@ export const login = async (req, res) => {
       const oldestSession = existingSessions[0];
       await Session.findByIdAndDelete(oldestSession._id);
       console.log(
-        `🔄 Revoked oldest session for ${user.email} (sessionId: ${oldestSession.sessionId})`
+        `🔄 Revoked oldest session for ${user.email} (sessionId: ${oldestSession.sessionId})`,
       );
     }
 
@@ -315,7 +315,7 @@ export const login = async (req, res) => {
 
     await newSession.save();
     console.log(
-      `✅ New session created for ${user.email} (sessionId: ${sessionId})`
+      `✅ New session created for ${user.email} (sessionId: ${sessionId})`,
     );
 
     // ============================================
@@ -337,7 +337,7 @@ export const login = async (req, res) => {
         sessionId: sessionId, // CRITICAL: Session ID for validation
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" } // Short-lived token for security
+      { expiresIn: "7d" }, // Short-lived token for security
     );
 
     console.log(`User logged in: ${user.email}`);
@@ -413,7 +413,7 @@ export const requestReset = async (req, res) => {
     const resetLink = `${
       process.env.BASE_URL
     }/reset-password?token=${resetToken}&email=${encodeURIComponent(
-      user.email
+      user.email,
     )}`;
 
     // Enhanced email template with better styling
@@ -518,7 +518,7 @@ export const resetPassword = async (req, res) => {
       .digest("hex");
     console.log(
       "🔍 Looking for token hash:",
-      resetTokenHash.substring(0, 10) + "..."
+      resetTokenHash.substring(0, 10) + "...",
     );
 
     // Find user by token hash and check expiry
@@ -589,7 +589,7 @@ export const sendPasswordSetupEmail = async (user, isNewUser = true) => {
     const setupLink = `${
       process.env.BASE_URL
     }/reset-password?token=${resetToken}&email=${encodeURIComponent(
-      user.email
+      user.email,
     )}`;
 
     const subject = isNewUser
@@ -676,7 +676,7 @@ export const logout = async (req, res) => {
 
       if (deletedSession) {
         console.log(
-          `🔓 Session deleted for user ${req.user.email} (sessionId: ${sessionId})`
+          `🔓 Session deleted for user ${req.user.email} (sessionId: ${sessionId})`,
         );
       } else {
         console.log(`⚠️ Session not found for sessionId: ${sessionId}`);
@@ -722,13 +722,6 @@ export const updateUserProfile = async (req, res) => {
     if (file) {
       const fileName = `avatar_${userId}_${Date.now()}`;
       const result = await uploadToImageKit(file.buffer, fileName, "/avatars", {
-        transformation: [
-          {
-            width: "200",
-            height: "200",
-            cropMode: "fo-face",
-          },
-        ],
         tags: ["avatar", "user"],
       });
       user.avatar = result.url;
@@ -772,7 +765,7 @@ export const getUserProfile = async (req, res) => {
     if (user.temporaryTokens && user.temporaryTokens.expiresAt) {
       prizeTokenTimeRemaining = Math.max(
         0,
-        new Date(user.temporaryTokens.expiresAt) - new Date()
+        new Date(user.temporaryTokens.expiresAt) - new Date(),
       );
     }
 

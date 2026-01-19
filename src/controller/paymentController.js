@@ -8,7 +8,7 @@ import {
   validateReferralCode,
   updateReferralStats,
 } from "../utils/referralUtils.js";
-import * as phonepeService from "../services/phonepeService.js";
+import * as razorpayService from "../services/razorpayService.js";
 
 // Setup nodemailer transporter
 const transporter = createTransporter();
@@ -107,7 +107,7 @@ export const createOrder = async (req, res) => {
       const monthlyAllocation = plan.durationDays * plan.dailyTokens;
       const startDate = new Date();
       const endDate = new Date(
-        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
       );
 
       console.log("Plan duration:", plan.durationDays, "days");
@@ -156,7 +156,7 @@ export const createOrder = async (req, res) => {
         await referrer.save();
         await updateReferralStats(referrer._id);
         console.log(
-          `Referral relationship created: ${user.email} -> ${referrer.email}`
+          `Referral relationship created: ${user.email} -> ${referrer.email}`,
         );
       }
 
@@ -169,7 +169,7 @@ export const createOrder = async (req, res) => {
       const monthlyAllocation = plan.durationDays * plan.dailyTokens;
       const startDate = new Date();
       const endDate = new Date(
-        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+        startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
       );
 
       user.subscription = {
@@ -192,7 +192,7 @@ export const createOrder = async (req, res) => {
     // Create local Order with pending status - use actual plan price
     const clientOrderId = new mongoose.Types.ObjectId().toString();
     console.log("Creating order with amount:", plan.price);
-    
+
     const order = await Order.create({
       clientOrderId: clientOrderId,
       providerOrderId: `pending_${clientOrderId}`, // Placeholder, will be updated by PhonePe
@@ -208,56 +208,48 @@ export const createOrder = async (req, res) => {
     });
     console.log("Order created with amount:", order.amount);
 
-    // Create payment in PhonePe
+    // Create payment in Razorpay
     try {
-      // Generate merchant order ID
-      const merchantOrderId = phonepeService.generateMerchantOrderId('SUB');
-      
-      // Convert amount to paisa
-      const amountInPaisa = phonepeService.rupeesToPaisa(plan.price);
-      
-      // Create payment in PhonePe
-      const paymentData = {
-        merchantOrderId,
+      const amountInPaisa = Math.round(plan.price * 100);
+      const razorpayOrder = await razorpayService.createOrder({
         amount: amountInPaisa,
-        redirectUrl: `${process.env.FRONTEND_URL}/payment-success?orderId=${order._id}`,
-        metaInfo: {
-          udf1: order._id.toString(),
-          udf2: 'subscription',
-          udf3: referralCode || ''
+        receipt: `rcpt_sub_${order._id}`,
+        notes: {
+          orderId: order._id.toString(),
+          type: "subscription",
+          referralCode: referralCode || "",
         },
-        expireAfter: 900 // 15 minutes
-      };
-      
-      const paymentResponse = await phonepeService.createPayment(paymentData);
-      
-      // Update order with PhonePe details
-      order.merchantOrderId = merchantOrderId;
-      order.phonePeOrderId = paymentResponse.orderId;
-      order.providerOrderId = paymentResponse.orderId;
+      });
+
+      // Update order with Razorpay details
+      order.providerOrderId = razorpayOrder.id;
+      // Store Razorpay Order ID as providerOrderId and maybe in a specific field if schema requires
+      order.merchantOrderId = razorpayOrder.id; // Mapping to existing schema if needed
       await order.save();
-      
+
       const paymentPayload = {
-        checkoutUrl: paymentResponse.redirectUrl,
-        redirectUrl: paymentResponse.redirectUrl,
-        orderId: paymentResponse.orderId,
-        merchantOrderId: merchantOrderId,
-        state: paymentResponse.state,
-        orderAmount: plan.price,
+        key: process.env.RAZORPAY_KEY_ID, // Send key to frontend
+        orderId: razorpayOrder.id,
+        amount: amountInPaisa,
+        currency: razorpayOrder.currency,
+        redirectUrl: `${process.env.FRONTEND_URL}/payment-success`, // Frontend handles payment
         userEmail: email.toLowerCase().trim(),
         userName: name.trim(),
+        userPhone: phone?.trim() || "",
       };
-      
-      console.log(`Order created with PhonePe: ${order.clientOrderId}, PhonePe Order: ${paymentResponse.orderId}`);
-      
+
+      console.log(
+        `Order created with Razorpay: ${order.clientOrderId}, RP Order: ${razorpayOrder.id}`,
+      );
+
       // Return response
       res.json({
         success: true,
         orderId: order.clientOrderId,
         clientOrderId: order.clientOrderId,
-        _id: order._id, // MongoDB ID for tracking
+        _id: order._id,
         paymentPayload: paymentPayload,
-        payload: paymentPayload,
+        payload: paymentPayload, // Keep backward compat if frontend uses this
         user: {
           id: user._id,
           name: user.name,
@@ -269,25 +261,24 @@ export const createOrder = async (req, res) => {
           })),
         },
       });
-    } catch (phonepeError) {
-      console.error('PhonePe payment creation failed:', phonepeError);
-      
+    } catch (paymentError) {
+      console.error("Payment creation failed:", paymentError);
+
       // Delete the order if payment creation fails
       await Order.findByIdAndDelete(order._id);
-      
+
       return res.status(500).json({
         success: false,
-        error: 'Failed to create payment. Please try again.',
-        details: phonepeError.message
+        error: "Failed to create payment. Please try again.",
+        details: paymentError.message,
       });
     }
-
   } catch (error) {
     console.error("Create order error:", error);
     res.status(500).json({
       success: false,
       error: "Internal server error",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -299,7 +290,7 @@ const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
     const resetLink = `${
       process.env.BASE_URL
     }/reset-password?token=${resetToken}&email=${encodeURIComponent(
-      user.email
+      user.email,
     )}`;
 
     // Plan information section

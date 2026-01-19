@@ -5,7 +5,8 @@ import cookieParser from "cookie-parser";
 import dbConnect from "./config/db.js";
 import paymentsRoute from "./route/payments.js";
 // import dummyCheckoutRoute from "./route/dummyCheckout.js"; // DISABLED - Using PhonePe
-import phonepeRoute from "./route/phonepe.js";
+// import phonepeRoute from "./route/phonepe.js"; // DISABLED - Using Razorpay
+import razorpayRoute from "./route/razorpay.js";
 import authRoute from "./route/auth.js";
 import userRoute from "./route/user.js";
 import adminRoute from "./route/admin.js";
@@ -68,7 +69,7 @@ app.use(
     ],
     optionsSuccessStatus: 200,
     preflightContinue: false,
-  })
+  }),
 );
 // Additional middleware
 app.use(cookieParser());
@@ -142,7 +143,8 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/payments", paymentsRoute);
-app.use("/api/phonepe", phonepeRoute); // PhonePe payment gateway
+app.use("/api/razorpay", razorpayRoute); // Razorpay payment gateway
+// app.use("/api/phonepe", phonepeRoute); // DISABLED
 app.use("/api/auth", authRoute);
 app.use("/api/user", userRoute);
 app.use("/api/admin", adminRoute);
@@ -164,7 +166,7 @@ app.listen(PORT, () => {
   console.log(
     `💳 Payment endpoint: ${
       process.env.BACKEND_URL || "http://localhost:" + PORT
-    }/api/payments/create-order`
+    }/api/payments/create-order`,
   );
   console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🔒 CORS configured for origins:`, allowedOrigins);

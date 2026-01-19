@@ -36,15 +36,7 @@ export const uploadToImageKitCommunity = async (file) => {
     fileName,
     "/clientsure/community-posts",
     {
-      transformation: [
-        {
-          width: "1200",
-          height: "800",
-          cropMode: "at_max",
-          quality: "auto",
-        },
-      ],
       tags: ["community", "post"],
-    }
+    },
   );
 };
