@@ -5,6 +5,14 @@ import {
   TokenTransaction,
   TokenPackage,
 } from "../models/index.js";
+import crypto from "crypto";
+import bcrypt from "bcrypt";
+import { sendWelcomeEmail } from "../utils/emailUtils.js";
+import {
+  generateReferralCode,
+  validateReferralCode,
+  updateReferralStats,
+} from "../utils/referralUtils.js";
 
 /**
  * Razorpay Controller
@@ -61,9 +69,119 @@ export const verifySubscriptionPayment = async (req, res) => {
     order.completedAt = new Date();
 
     // Activate subscription
+    let user;
     if (order.userId) {
-      const user = await User.findById(order.userId);
-      if (user) {
+      user = await User.findById(order.userId);
+    } else {
+      // New User Creation Logic
+      console.log("Creating new user for verified order:", orderId);
+      const email = order.userEmail;
+
+      // Check if user exists (race condition check)
+      user = await User.findOne({ email: email.toLowerCase() });
+
+      if (!user) {
+        // Register new user
+        const saltRounds = 12;
+        const passwordHash = await bcrypt.hash(email, saltRounds);
+
+        // Handle referral
+        let referrer = null;
+        if (order.referralCode) {
+          referrer = await validateReferralCode(order.referralCode);
+        }
+
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        const resetTokenHash = crypto
+          .createHash("sha256")
+          .update(resetToken)
+          .digest("hex");
+        const resetTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+        let newReferralCode;
+        let isUnique = false;
+        while (!isUnique) {
+          newReferralCode = generateReferralCode();
+          const existingUser = await User.findOne({
+            referralCode: newReferralCode,
+          });
+          if (!existingUser) isUnique = true;
+        }
+
+        // Calculate subscription details
+        const plan = order.planId;
+        const monthlyAllocation = plan.durationDays * plan.dailyTokens;
+        const startDate = new Date();
+        const endDate = new Date(
+          startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
+        );
+
+        user = new User({
+          name: order.userName,
+          email: email.toLowerCase(),
+          phone: order.userPhone || null,
+          passwordHash,
+          resetTokenHash,
+          resetTokenExpires,
+          tokens: plan.dailyTokens,
+          tokensUsedTotal: 0,
+          monthlyTokensTotal: monthlyAllocation,
+          monthlyTokensUsed: 0,
+          monthlyTokensRemaining: monthlyAllocation,
+          referralCode: newReferralCode,
+          referredBy: referrer ? referrer._id : null,
+          referralStats: {
+            totalReferrals: 0,
+            activeReferrals: 0,
+            totalEarnings: 0,
+          },
+          subscription: {
+            planId: plan._id,
+            startDate,
+            endDate,
+            dailyTokens: plan.dailyTokens,
+            monthlyAllocation,
+            isActive: true,
+          },
+        });
+
+        await user.save();
+        console.log("New user created via Razorpay verification:", user.email);
+
+        // Update order with new userId
+        order.userId = user._id;
+
+        // Referral logic
+        if (referrer) {
+          referrer.referrals.push({
+            userId: user._id,
+            joinedAt: new Date(),
+            isActive: false,
+            subscriptionStatus: "active", // Immediately active since paid
+          });
+          await referrer.save();
+          await updateReferralStats(referrer._id);
+        }
+
+        // Send Welcome Email
+        const planInfo = {
+          planId: plan._id,
+          planName: plan.name,
+          planPrice: plan.price,
+        };
+        await sendWelcomeEmail(user, resetToken, planInfo);
+      } else {
+        console.log(
+          "User already exists (race condition), linking order:",
+          email,
+        );
+        order.userId = user._id;
+      }
+    }
+
+    if (user) {
+      if (order.userId && !user.isNew) {
+        // Re-apply subscription update for existing users/renewals
         const plan = order.planId;
         const startDate = new Date();
         const endDate = new Date(
@@ -84,7 +202,7 @@ export const verifySubscriptionPayment = async (req, res) => {
         user.monthlyTokensRemaining = monthlyAllocation;
 
         await user.save();
-        console.log("User subscription activated:", user.email);
+        console.log("User subscription updated/activated:", user.email);
       }
     }
 

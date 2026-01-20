@@ -218,7 +218,7 @@ export const getAccessedLeadById = async (req, res) => {
     // Check if user has accessed this lead
     const user = await User.findById(userId).select("accessedLeads");
     const accessedLead = user?.accessedLeads?.find(
-      (item) => item.leadId.toString() === id
+      (item) => item.leadId.toString() === id,
     );
 
     if (!accessedLead) {
@@ -305,7 +305,7 @@ export const bulkAccessLeads = async (req, res) => {
     const accessedLeadIds =
       user.accessedLeads?.map((item) => item.leadId.toString()) || [];
     const newLeads = leads.filter(
-      (lead) => !accessedLeadIds.includes(lead._id.toString())
+      (lead) => !accessedLeadIds.includes(lead._id.toString()),
     );
     const tokensRequired = newLeads.length;
 
@@ -333,7 +333,7 @@ export const bulkAccessLeads = async (req, res) => {
     // Deduct tokens using priority system (daily first, then prize)
     const deductionResult = await deductTokensWithPriority(
       user._id,
-      tokensRequired
+      tokensRequired,
     );
     if (!deductionResult.success) {
       return res.status(500).json({
@@ -362,7 +362,7 @@ export const bulkAccessLeads = async (req, res) => {
 
     // Batch update leads' accessedBy arrays for better performance
     const leadsToUpdate = newLeads.filter(
-      (lead) => !lead.accessedBy.includes(userId)
+      (lead) => !lead.accessedBy.includes(userId),
     );
 
     if (leadsToUpdate.length > 0) {
@@ -372,7 +372,7 @@ export const bulkAccessLeads = async (req, res) => {
             filter: { _id: lead._id },
             update: { $addToSet: { accessedBy: userId } },
           },
-        }))
+        })),
       );
     }
 
@@ -499,7 +499,7 @@ export const getAccessedLeads = async (req, res) => {
     const combinedLeads = filteredAccessList
       .map((accessItem) => {
         const leadDetails = matchingLeads.find(
-          (l) => l._id.toString() === accessItem.leadId.toString()
+          (l) => l._id.toString() === accessItem.leadId.toString(),
         );
         if (!leadDetails) return null; // Filtered out by search/category/etc
 
@@ -561,7 +561,7 @@ export const exportLeadData = async (req, res) => {
 
     const user = await User.findById(userId).select("accessedLeads");
     const accessedLead = user?.accessedLeads?.find(
-      (item) => item.leadId.toString() === leadId
+      (item) => item.leadId.toString() === leadId,
     );
 
     if (!accessedLead) {
@@ -609,7 +609,7 @@ export const exportLeadData = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
 
     res.send(buffer);
@@ -718,7 +718,7 @@ export const bulkExportLeads = async (req, res) => {
     const combinedLeads = filteredAccessList
       .map((accessItem) => {
         const leadDetails = matchingLeads.find(
-          (l) => l._id.toString() === accessItem.leadId.toString()
+          (l) => l._id.toString() === accessItem.leadId.toString(),
         );
         if (!leadDetails) return null;
 
@@ -788,7 +788,7 @@ export const bulkExportLeads = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
 
     res.send(buffer);
@@ -910,7 +910,7 @@ export const sendBulkEmail = async (req, res) => {
         console.log(`📧 Sending email to: ${lead.email}`);
 
         const mailOptions = {
-          from: `"${user.name}" <${process.env.SMTP_USER}>`,
+          from: `"${user.name}" <${process.env.EMAIL_USER}>`,
           to: lead.email,
           subject: subject,
           cc: cc || undefined,
@@ -984,7 +984,7 @@ export const sendBulkEmail = async (req, res) => {
       } catch (error) {
         console.error(
           `❌ Failed to send email to ${lead.email}:`,
-          error.message
+          error.message,
         );
         recipients.push({
           leadId: lead._id,
@@ -998,7 +998,7 @@ export const sendBulkEmail = async (req, res) => {
     }
 
     console.log(
-      `📊 Email sending completed: ${successCount} success, ${failedCount} failed`
+      `📊 Email sending completed: ${successCount} success, ${failedCount} failed`,
     );
 
     // Save email feedback

@@ -27,7 +27,7 @@ const sessionSchema = new mongoose.Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      index: true, // For sorting and TTL
+      // index: true removed to avoid duplicate with explicit index below
     },
     lastActiveAt: {
       type: Date,
@@ -36,13 +36,13 @@ const sessionSchema = new mongoose.Schema(
   },
   {
     timestamps: false, // We're managing createdAt manually
-  }
+  },
 );
 
 // TTL Index: Auto-delete sessions after 30 days of inactivity
 sessionSchema.index(
   { createdAt: 1 },
-  { expireAfterSeconds: 30 * 24 * 60 * 60 }
+  { expireAfterSeconds: 30 * 24 * 60 * 60 },
 );
 
 // Compound index for efficient session validation

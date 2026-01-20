@@ -418,7 +418,7 @@ export const requestReset = async (req, res) => {
 
     // Enhanced email template with better styling
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: "Reset Your ClientSure Password",
       html: `
@@ -604,7 +604,7 @@ export const sendPasswordSetupEmail = async (user, isNewUser = true) => {
 
     // Enhanced email template
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: subject,
       html: `

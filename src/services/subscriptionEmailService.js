@@ -1,4 +1,4 @@
-import { createTransporter, sendEmailWithRetry } from '../utils/emailUtils.js';
+import { createTransporter, sendEmailWithRetry } from "../utils/emailUtils.js";
 
 /**
  * Send subscription expiry warning email
@@ -10,17 +10,18 @@ export const sendExpiryWarningEmail = async (user, daysLeft) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     const renewalLink = `${process.env.BASE_URL}/user/subscription?renewal=true&email=${encodeURIComponent(user.email)}`;
-    const urgencyColor = daysLeft <= 1 ? '#dc3545' : daysLeft <= 3 ? '#fd7e14' : '#ffc107';
-    const urgencyIcon = daysLeft <= 1 ? '🚨' : daysLeft <= 3 ? '⚠️' : '⏰';
+    const urgencyColor =
+      daysLeft <= 1 ? "#dc3545" : daysLeft <= 3 ? "#fd7e14" : "#ffc107";
+    const urgencyIcon = daysLeft <= 1 ? "🚨" : daysLeft <= 3 ? "⚠️" : "⏰";
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
-      subject: `${urgencyIcon} Your subscription expires in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`,
+      subject: `${urgencyIcon} Your subscription expires in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -37,12 +38,12 @@ export const sendExpiryWarningEmail = async (user, daysLeft) => {
           <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
             <h2 style="color: ${urgencyColor};">Hello ${user.name},</h2>
             
-            <p>Your ClientSure subscription will expire in <strong style="color: ${urgencyColor};">${daysLeft} day${daysLeft > 1 ? 's' : ''}</strong>.</p>
+            <p>Your ClientSure subscription will expire in <strong style="color: ${urgencyColor};">${daysLeft} day${daysLeft > 1 ? "s" : ""}</strong>.</p>
             
             <div style="background: #fff3cd; padding: 20px; border-left: 4px solid ${urgencyColor}; margin: 20px 0; border-radius: 5px;">
               <h3 style="margin-top: 0; color: #856404;">📅 Subscription Details:</h3>
-              <p style="margin: 5px 0;"><strong>Plan:</strong> ${user.subscription?.planId?.name || 'Premium'}</p>
-              <p style="margin: 5px 0;"><strong>Expires:</strong> ${new Date(user.subscription.endDate).toLocaleDateString('en-IN')}</p>
+              <p style="margin: 5px 0;"><strong>Plan:</strong> ${user.subscription?.planId?.name || "Premium"}</p>
+              <p style="margin: 5px 0;"><strong>Expires:</strong> ${new Date(user.subscription.endDate).toLocaleDateString("en-IN")}</p>
               <p style="margin: 5px 0;"><strong>Current Tokens:</strong> ${user.tokens || 0} daily, ${user.monthlyTokensRemaining || 0} monthly</p>
             </div>
             
@@ -72,14 +73,16 @@ export const sendExpiryWarningEmail = async (user, daysLeft) => {
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
-    console.log(`Expiry warning email sent to ${user.email} (${daysLeft} days left)`);
+    console.log(
+      `Expiry warning email sent to ${user.email} (${daysLeft} days left)`,
+    );
     return true;
   } catch (error) {
-    console.error('Send expiry warning email error:', error);
+    console.error("Send expiry warning email error:", error);
     return false;
   }
 };
@@ -93,15 +96,15 @@ export const sendSubscriptionExpiredEmail = async (user) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     const renewalLink = `${process.env.BASE_URL}/user/subscription?expired=true&email=${encodeURIComponent(user.email)}`;
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
-      subject: '🔴 Your ClientSure subscription has expired',
+      subject: "🔴 Your ClientSure subscription has expired",
       html: `
         <!DOCTYPE html>
         <html>
@@ -118,7 +121,7 @@ export const sendSubscriptionExpiredEmail = async (user) => {
           <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
             <h2 style="color: #dc3545;">Hello ${user.name},</h2>
             
-            <p>Your ClientSure subscription expired on <strong>${new Date(user.subscription.endDate).toLocaleDateString('en-IN')}</strong>.</p>
+            <p>Your ClientSure subscription expired on <strong>${new Date(user.subscription.endDate).toLocaleDateString("en-IN")}</strong>.</p>
             
             <div style="background: #f8d7da; padding: 20px; border-left: 4px solid #dc3545; margin: 20px 0; border-radius: 5px;">
               <h3 style="margin-top: 0; color: #721c24;">⚠️ Account Status:</h3>
@@ -158,14 +161,14 @@ export const sendSubscriptionExpiredEmail = async (user) => {
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
     console.log(`Subscription expired email sent to ${user.email}`);
     return true;
   } catch (error) {
-    console.error('Send subscription expired email error:', error);
+    console.error("Send subscription expired email error:", error);
     return false;
   }
 };
@@ -180,14 +183,19 @@ export const sendRenewalReminderEmail = async (user, daysExpired) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     const renewalLink = `${process.env.BASE_URL}/user/subscription?reminder=true&email=${encodeURIComponent(user.email)}`;
-    const specialOffer = daysExpired <= 7 ? '10% extra tokens' : daysExpired <= 14 ? '5% extra tokens' : 'Welcome back bonus';
+    const specialOffer =
+      daysExpired <= 7
+        ? "10% extra tokens"
+        : daysExpired <= 14
+          ? "5% extra tokens"
+          : "Welcome back bonus";
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: `💙 We miss you! Come back to ClientSure (Day ${daysExpired})`,
       html: `
@@ -245,14 +253,16 @@ export const sendRenewalReminderEmail = async (user, daysExpired) => {
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
-    console.log(`Renewal reminder email sent to ${user.email} (${daysExpired} days expired)`);
+    console.log(
+      `Renewal reminder email sent to ${user.email} (${daysExpired} days expired)`,
+    );
     return true;
   } catch (error) {
-    console.error('Send renewal reminder email error:', error);
+    console.error("Send renewal reminder email error:", error);
     return false;
   }
 };

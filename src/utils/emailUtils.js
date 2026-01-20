@@ -1,9 +1,7 @@
-import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import nodemailer from "nodemailer";
+import dotenv from "dotenv";
 
-
-dotenv.config()
-
+dotenv.config();
 
 /**
  * Create and verify SMTP transporter
@@ -11,29 +9,31 @@ dotenv.config()
  */
 export const createTransporter = () => {
   try {
-    console.log('🔧 Creating SMTP transporter...');
-    console.log('📧 SMTP User:', process.env.SMTP_USER);
-    console.log('🔑 SMTP Pass configured:', !!process.env.SMTP_PASS);
-    
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ SMTP credentials not configured');
+    console.log("🔧 Creating SMTP transporter...");
+    console.log("📧 Email User:", process.env.EMAIL_USER);
+    console.log("🔑 App Password configured:", !!process.env.APP_PASS);
+
+    if (!process.env.EMAIL_USER || !process.env.APP_PASS) {
+      console.error(
+        "❌ Email credentials not configured (EMAIL_USER or APP_PASS missing)",
+      );
       return null;
     }
-    
+
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      service: "gmail",
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
+        user: process.env.EMAIL_USER,
+        pass: process.env.APP_PASS,
       },
       debug: false,
-      logger: false
+      logger: false,
     });
 
-    console.log('✅ SMTP Transporter created successfully');
+    console.log("✅ SMTP Transporter created successfully");
     return transporter;
   } catch (error) {
-    console.error('❌ Failed to initialize SMTP transporter:', error);
+    console.error("❌ Failed to initialize SMTP transporter:", error);
     return null;
   }
 };
@@ -45,11 +45,15 @@ export const createTransporter = () => {
  * @param {number} retries - Number of retry attempts
  * @returns {Promise<boolean>} Success status
  */
-export const sendEmailWithRetry = async (transporter, mailOptions, retries = 3) => {
+export const sendEmailWithRetry = async (
+  transporter,
+  mailOptions,
+  retries = 3,
+) => {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       if (!transporter) {
-        throw new Error('Transporter not initialized');
+        throw new Error("Transporter not initialized");
       }
 
       console.log(`📤 Attempt ${attempt}: Sending email to ${mailOptions.to}`);
@@ -60,20 +64,20 @@ export const sendEmailWithRetry = async (transporter, mailOptions, retries = 3) 
       console.error(`❌ Email sending attempt ${attempt} failed:`, {
         error: error.message,
         code: error.code,
-        command: error.command
+        command: error.command,
       });
-      
+
       if (attempt === retries) {
         throw error;
       }
-      
+
       // Wait before retrying (exponential backoff)
       const delay = Math.pow(2, attempt) * 1000;
       console.log(`⏳ Waiting ${delay}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  
+
   return false;
 };
 
@@ -86,13 +90,13 @@ export const sendPasswordResetConfirmationEmail = async (user) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
-      subject: 'Password Reset Successful - ClientSure',
+      subject: "Password Reset Successful - ClientSure",
       html: `
         <!DOCTYPE html>
         <html>
@@ -125,109 +129,14 @@ export const sendPasswordResetConfirmationEmail = async (user) => {
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
     console.log(`Password reset confirmation email sent to ${user.email}`);
     return true;
   } catch (error) {
-    console.error('Send password reset confirmation email error:', error);
-    return false;
-  }
-};
-
-/**
- * Send welcome email with password reset link
- * @param {object} user - User object
- * @param {string} resetToken - Password reset token
- * @param {object} planInfo - Plan information (optional)
- * @returns {Promise<boolean>} Success status
- */
-export const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
-  try {
-    const transporter = createTransporter();
-    if (!transporter) {
-      throw new Error('Email transporter not available');
-    }
-
-    const resetLink = `${process.env.BASE_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
-
-    const planSection = planInfo ? `
-      <div style="background: #e8f5e8; padding: 20px; border-left: 4px solid #28a745; margin: 20px 0;">
-        <h3 style="margin-top: 0; color: #28a745;">Selected Plan:</h3>
-        <p><strong>Plan:</strong> ${planInfo.planName}</p>
-        <p><strong>Price:</strong> ₹${planInfo.planPrice}</p>
-        <p style="color: #666; font-size: 14px; margin-bottom: 0;">Complete your payment to activate your subscription.</p>
-      </div>
-    ` : '';
-
-    const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
-      to: user.email,
-      subject: 'Welcome to ClientSure - Set Your Password',
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #007cba 0%, #005a87 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-            <h1 style="margin: 0; font-size: 28px;">ClientSure</h1>
-            <p style="margin: 10px 0 0; font-size: 18px; opacity: 0.9;">Welcome! 🎉</p>
-          </div>
-          
-          <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #007cba;">Hello ${user.name},</h2>
-            
-            <p>Welcome to ClientSure! Your account has been created successfully.</p>
-            
-            <p>To get started and secure your account, please set your password by clicking the button below:</p>
-            
-            <p style="margin: 30px 0; text-align: center;">
-              <a href="${resetLink}" 
-                 style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold; font-size: 16px;">
-                Set Your Password
-              </a>
-            </p>
-            
-            ${planSection}
-            
-            <div style="background: #f8f9fa; padding: 20px; border-left: 4px solid #007cba; margin: 20px 0;">
-              <h3 style="margin-top: 0; color: #007cba;">Your Account Details:</h3>
-              <p><strong>Name:</strong> ${user.name}</p>
-              <p><strong>Email:</strong> ${user.email}</p>
-              ${user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ''}
-              <p><strong>Temporary Password:</strong> ${user.email}</p>
-              <p style="color: #666; font-size: 14px; margin-bottom: 0;">You can use your email as password to login temporarily, but we recommend setting a secure password.</p>
-            </div>
-            
-            <p style="margin: 30px 0; color: #666; font-size: 14px;">
-              <strong>This link will expire in 24 hours.</strong> If you didn't create this account, you can safely ignore this email.
-            </p>
-            
-            <p style="color: #666; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px;">
-              If the button doesn't work, copy and paste this link into your browser:<br>
-              <span style="word-break: break-all; color: #007cba;">${resetLink}</span>
-            </p>
-            
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
-              <p>This email was sent to ${user.email} for your new ClientSure account.</p>
-              <p>© ${new Date().getFullYear()} ClientSure. All rights reserved.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `
-    };
-
-    await sendEmailWithRetry(transporter, mailOptions);
-    console.log(`Welcome email sent to ${user.email}`);
-    return true;
-  } catch (error) {
-    console.error('Send welcome email error:', error);
+    console.error("Send password reset confirmation email error:", error);
     return false;
   }
 };
@@ -243,21 +152,21 @@ export const sendEmail = async (to, subject, html) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to,
       subject,
-      html
+      html,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
     console.log(`Email sent to ${to}`);
     return true;
   } catch (error) {
-    console.error('Send email error:', error);
+    console.error("Send email error:", error);
     return false;
   }
 };
@@ -271,16 +180,16 @@ export const sendRepurchaseEmail = async (user) => {
   try {
     const transporter = createTransporter();
     if (!transporter) {
-      throw new Error('Email transporter not available');
+      throw new Error("Email transporter not available");
     }
 
     // Create repurchase link
     const repurchaseLink = `${process.env.BASE_URL}/?repurchase=true&email=${encodeURIComponent(user.email)}`;
 
     const mailOptions = {
-      from: `"ClientSure" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
       to: user.email,
-      subject: 'Your Daily Tokens Are Exhausted - Renew Your Plan',
+      subject: "Your Daily Tokens Are Exhausted - Renew Your Plan",
       html: `
         <!DOCTYPE html>
         <html>
@@ -336,15 +245,112 @@ export const sendRepurchaseEmail = async (user) => {
           </div>
         </body>
         </html>
-      `
+      `,
     };
 
     await sendEmailWithRetry(transporter, mailOptions);
     console.log(`Repurchase email sent to ${user.email}`);
-    
+
     return true;
   } catch (error) {
-    console.error('Send repurchase email error:', error);
+    console.error("Send repurchase email error:", error);
+    return false;
+  }
+};
+
+/**
+ * Send welcome email with password reset link
+ * @param {object} user - User object
+ * @param {string} resetToken - Password reset token
+ * @param {object} planInfo - Plan information (optional)
+ * @returns {Promise<boolean>} Success status
+ */
+export const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      throw new Error("Email transporter not available");
+    }
+
+    const resetLink = `${process.env.BASE_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+
+    const planSection = planInfo
+      ? `
+      <div style="background: #e8f5e8; padding: 20px; border-left: 4px solid #28a745; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #28a745;">Selected Plan:</h3>
+        <p><strong>Plan:</strong> ${planInfo.planName}</p>
+        <p><strong>Price:</strong> ₹${planInfo.planPrice}</p>
+        <p style="color: #666; font-size: 14px; margin-bottom: 0;">Complete your payment to activate your subscription.</p>
+      </div>
+    `
+      : "";
+
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: "Welcome to ClientSure - Set Your Password",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #007cba 0%, #005a87 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0; font-size: 28px;">ClientSure</h1>
+            <p style="margin: 10px 0 0; font-size: 18px; opacity: 0.9;">Welcome! 🎉</p>
+          </div>
+          
+          <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h2 style="color: #007cba;">Hello ${user.name},</h2>
+            
+            <p>Welcome to ClientSure! Your account has been created successfully.</p>
+            
+            <p>To get started and secure your account, please set your password by clicking the button below:</p>
+            
+            <p style="margin: 30px 0; text-align: center;">
+              <a href="${resetLink}" 
+                 style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold; font-size: 16px;">
+                Set Your Password
+              </a>
+            </p>
+            
+            ${planSection}
+            
+            <div style="background: #f8f9fa; padding: 20px; border-left: 4px solid #007cba; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #007cba;">Your Account Details:</h3>
+              <p><strong>Name:</strong> ${user.name}</p>
+              <p><strong>Email:</strong> ${user.email}</p>
+              ${user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ""}
+              <p><strong>Temporary Password:</strong> ${user.email}</p>
+              <p style="color: #666; font-size: 14px; margin-bottom: 0;">You can use your email as password to login temporarily, but we recommend setting a secure password.</p>
+            </div>
+            
+            <p style="margin: 30px 0; color: #666; font-size: 14px;">
+              <strong>This link will expire in 24 hours.</strong> If you didn't create this account, you can safely ignore this email.
+            </p>
+            
+            <p style="color: #666; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <span style="word-break: break-all; color: #007cba;">${resetLink}</span>
+            </p>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
+              <p>This email was sent to ${user.email} for your new ClientSure account.</p>
+              <p>© ${new Date().getFullYear()} ClientSure. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`Welcome email sent to ${user.email}`);
+    return true;
+  } catch (error) {
+    console.error("Send welcome email error:", error);
     return false;
   }
 };

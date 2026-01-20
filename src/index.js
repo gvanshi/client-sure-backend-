@@ -34,17 +34,10 @@ const app = express();
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.BACKEND_URL,
-  "http://localhost:3000",
-  "http://localhost:5000", // Add backend localhost for dummy checkout
-  "http://localhost:5173",
-  "https://client-sure-frontened.vercel.app",
-  "https://client-sure-backend.vercel.app", // Add backend production URL
-  process.env.BASE_URL,
 ].filter(Boolean);
 
 // Log allowed origins for debugging
 console.log("🔒 CORS Allowed Origins:", allowedOrigins);
-console.log("🌐 BASE_URL from env:", process.env.BASE_URL);
 
 app.use(
   cors({

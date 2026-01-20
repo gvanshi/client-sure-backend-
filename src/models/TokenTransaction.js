@@ -54,31 +54,31 @@ const tokenTransactionSchema = new mongoose.Schema(
       type: String,
       required: false,
       sparse: true,
-      index: true
+      index: true,
     },
     phonePeOrderId: {
       type: String,
-      required: false
+      required: false,
     },
     phonePeTransactionId: {
       type: String,
-      required: false
+      required: false,
     },
     paymentMode: {
       type: String,
-      required: false // UPI_QR, UPI_INTENT, CARD, etc.
+      required: false, // UPI_QR, UPI_INTENT, CARD, etc.
     },
     paymentRail: {
       type: mongoose.Schema.Types.Mixed,
-      required: false // UPI details, card details, etc.
+      required: false, // UPI details, card details, etc.
     },
     failureReason: {
       type: String,
-      required: false
+      required: false,
     },
     completedAt: {
       type: Date,
-      required: false
+      required: false,
     },
     metadata: {
       userAgent: String,
@@ -100,18 +100,17 @@ const tokenTransactionSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Compound indexes for efficient queries
 tokenTransactionSchema.index({ userId: 1, createdAt: -1 });
 tokenTransactionSchema.index({ status: 1, createdAt: -1 });
-tokenTransactionSchema.index({ merchantOrderId: 1 });
 
 // Auto-expire tokens after 24 hours (TTL index)
 tokenTransactionSchema.index(
   { "metadata.expiresAt": 1 },
-  { expireAfterSeconds: 0 }
+  { expireAfterSeconds: 0 },
 );
 
 export default mongoose.model("TokenTransaction", tokenTransactionSchema);
