@@ -35,7 +35,6 @@
     }
   ],
   "env": {
-    "NODE_ENV": "production",
-    "CRON_SECRET": "@cron_secret"
+    "NODE_ENV": "production"
   }
 }
