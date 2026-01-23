@@ -12,6 +12,7 @@ import {
   generateReferralCode,
   validateReferralCode,
   updateReferralStats,
+  processReferralReward,
 } from "../utils/referralUtils.js";
 
 /**
@@ -156,11 +157,13 @@ export const verifySubscriptionPayment = async (req, res) => {
           referrer.referrals.push({
             userId: user._id,
             joinedAt: new Date(),
-            isActive: false,
-            subscriptionStatus: "active", // Immediately active since paid
+            isActive: false, // Will be set to true by processReferralReward
+            subscriptionStatus: "active",
           });
           await referrer.save();
-          await updateReferralStats(referrer._id);
+
+          // Process Commission Reward
+          await processReferralReward(user._id, referrer._id);
         }
 
         // Send Welcome Email
@@ -203,6 +206,14 @@ export const verifySubscriptionPayment = async (req, res) => {
 
         await user.save();
         console.log("User subscription updated/activated:", user.email);
+
+        // Handle referral reward for existing users renewal/payment
+        if (user.referredBy) {
+          console.log(
+            `Processing referral reward for existing user ${user.email} (Referred by: ${user.referredBy})`,
+          );
+          await processReferralReward(user._id, user.referredBy);
+        }
       }
     }
 
