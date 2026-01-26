@@ -55,6 +55,134 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // === ENHANCED TOKEN SYSTEM (New) ===
+    // Daily Tokens - Refreshed every day, valid until plan expires
+    dailyTokens: {
+      current: {
+        type: Number,
+        default: 0,
+      },
+      limit: {
+        type: Number,
+        default: 100,
+      },
+      usedToday: {
+        type: Number,
+        default: 0,
+      },
+      lastRefreshedAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+    // Purchased Tokens - Bought via extra token packages, valid until plan expires
+    purchasedTokens: {
+      current: {
+        type: Number,
+        default: 0,
+      },
+      total: {
+        type: Number,
+        default: 0,
+      },
+      used: {
+        type: Number,
+        default: 0,
+      },
+      lastPurchasedAt: {
+        type: Date,
+        default: null,
+      },
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+    },
+    // Bonus Tokens - One-time grant on subscription purchase, valid until plan expires
+    bonusTokens: {
+      current: {
+        type: Number,
+        default: 0,
+      },
+      initial: {
+        type: Number,
+        default: 0,
+      },
+      used: {
+        type: Number,
+        default: 0,
+      },
+      grantedAt: {
+        type: Date,
+        default: null,
+      },
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+    },
+    // Prize Tokens - Earned from contests/referrals, valid until plan expires
+    prizeTokens: {
+      current: {
+        type: Number,
+        default: 0,
+      },
+      used: {
+        type: Number,
+        default: 0,
+      },
+      grantedAt: {
+        type: Date,
+        default: null,
+      },
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+      grantedBy: {
+        type: String,
+        default: null,
+      },
+      prizeType: {
+        type: String,
+        default: null,
+      },
+      history: [
+        {
+          amount: Number,
+          grantedAt: Date,
+          grantedBy: String,
+          prizeType: String,
+        },
+      ],
+    },
+    // Token Usage Statistics
+    tokenStats: {
+      totalUsed: {
+        type: Number,
+        default: 0,
+      },
+      dailyUsed: {
+        type: Number,
+        default: 0,
+      },
+      purchasedUsed: {
+        type: Number,
+        default: 0,
+      },
+      bonusUsed: {
+        type: Number,
+        default: 0,
+      },
+      prizeUsed: {
+        type: Number,
+        default: 0,
+      },
+      planPeriodUsed: {
+        type: Number,
+        default: 0,
+      },
+    },
     subscription: {
       planId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -322,7 +450,7 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes for Analytics Optimization

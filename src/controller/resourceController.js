@@ -1,5 +1,10 @@
 import { User, Resource } from "../models/index.js";
 import { sendRepurchaseEmail } from "../utils/emailUtils.js";
+import {
+  deductTokens,
+  calculateTotalTokens,
+  getTokenBreakdown,
+} from "../utils/enhancedTokenUtils.js";
 
 // GET /api/resources - Get all available resources
 export const getResources = async (req, res) => {
@@ -74,35 +79,77 @@ export const accessResource = async (req, res) => {
       });
     }
 
-    // Add to accessed resources history
-    if (!user.accessedResources) {
-      user.accessedResources = [];
+    // Define token cost for resource access (can be made dynamic per resource)
+    const resourceCost = resource.tokenCost || 10; // Default 10 tokens
+
+    // Check if user has enough tokens
+    const availableTokens = calculateTotalTokens(user);
+    if (availableTokens < resourceCost) {
+      return res.status(403).json({
+        error: "Insufficient tokens",
+        required: resourceCost,
+        available: availableTokens,
+        needsPurchase: true,
+      });
     }
-    user.accessedResources.unshift({
+
+    // Deduct tokens with priority: Daily → Purchased → Bonus → Prize
+    try {
+      const deductionResult = await deductTokens(
+        userId,
+        resourceCost,
+        `resource_access:${resource._id}`,
+      );
+
+      console.log(
+        `Resource accessed: ${resource.title} by ${user.email}`,
+        `Tokens deducted: ${resourceCost}`,
+        `Breakdown:`,
+        deductionResult.breakdown,
+        `Remaining total: ${deductionResult.remaining.total}`,
+      );
+    } catch (deductError) {
+      console.error("Token deduction failed:", deductError);
+      return res.status(500).json({
+        error: "Failed to deduct tokens",
+        message: deductError.message,
+      });
+    }
+
+    // Refresh user to get updated token balances
+    const updatedUser = await User.findById(userId);
+
+    // Add to accessed resources history
+    if (!updatedUser.accessedResources) {
+      updatedUser.accessedResources = [];
+    }
+    updatedUser.accessedResources.unshift({
       resourceId: resource._id,
       accessedAt: new Date(),
     });
 
     // Keep only last 100 accessed resources
-    if (user.accessedResources.length > 100) {
-      user.accessedResources = user.accessedResources.slice(0, 100);
+    if (updatedUser.accessedResources.length > 100) {
+      updatedUser.accessedResources = updatedUser.accessedResources.slice(
+        0,
+        100,
+      );
     }
 
-    await user.save();
+    await updatedUser.save();
 
-    // Log access
-    console.log(
-      `Resource accessed: ${resource.title} by ${user.email}, tokens remaining: ${user.tokens}`
-    );
+    // Get updated token breakdown
+    const tokenBreakdown = getTokenBreakdown(updatedUser);
 
-    // Check if monthly tokens are low and send repurchase email
-    if (user.monthlyTokensRemaining <= 100) {
-      await sendRepurchaseEmail(user);
+    // Check if tokens are low and send repurchase email
+    if (tokenBreakdown.total <= 100) {
+      await sendRepurchaseEmail(updatedUser);
     }
 
     // Return resource access data
     res.json({
       message: "Resource access granted",
+      tokensDeducted: resourceCost,
       resource: {
         id: resource._id,
         title: resource.title,
@@ -110,7 +157,7 @@ export const accessResource = async (req, res) => {
         url: resource.url,
         content: resource.content,
       },
-      tokensRemaining: user.tokens,
+      tokenBalance: tokenBreakdown,
     });
   } catch (error) {
     console.error("Access resource error:", error);
@@ -180,7 +227,7 @@ export const getAccessedResources = async (req, res) => {
     const result = paginatedResources
       .map((accessItem) => {
         const resource = resources.find(
-          (r) => r._id.toString() === accessItem.resourceId.toString()
+          (r) => r._id.toString() === accessItem.resourceId.toString(),
         );
         return {
           id: resource?._id,
@@ -225,7 +272,7 @@ export const getResourceById = async (req, res) => {
     const user = await User.findById(userId).select("accessedResources");
     const hasAccessed =
       user?.accessedResources?.some(
-        (item) => item.resourceId.toString() === id
+        (item) => item.resourceId.toString() === id,
       ) || false;
 
     res.json({

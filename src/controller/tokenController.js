@@ -4,6 +4,12 @@ import { User } from "../models/index.js";
 import TokenPackage from "../models/TokenPackage.js";
 import TokenTransaction from "../models/TokenTransaction.js";
 import { createNotification } from "../utils/notificationUtils.js";
+import * as razorpayService from "../services/razorpayService.js";
+import {
+  addPurchasedTokens,
+  getTokenBreakdown,
+  calculateTotalTokens,
+} from "../utils/enhancedTokenUtils.js";
 
 /**
  * Get available token packages
@@ -53,9 +59,8 @@ export const createTokenPurchase = async (req, res) => {
     const ipAddress = req.ip || req.connection.remoteAddress;
 
     // Validate package
-    const tokenPackage = await TokenPackage.findById(packageId).session(
-      session
-    );
+    const tokenPackage =
+      await TokenPackage.findById(packageId).session(session);
     if (!tokenPackage || !tokenPackage.isActive) {
       await session.abortTransaction();
       return res.status(404).json({
@@ -109,6 +114,7 @@ export const createTokenPurchase = async (req, res) => {
       .toUpperCase()}`;
 
     // Create transaction record
+    const currentTotal = calculateTotalTokens(user);
     const transaction = new TokenTransaction({
       userId,
       packageId: tokenPackage._id,
@@ -117,42 +123,40 @@ export const createTokenPurchase = async (req, res) => {
       tokens: tokenPackage.tokens,
       amount: tokenPackage.price,
       status: "pending",
-      balanceBefore: user.tokens,
-      balanceAfter: user.tokens + tokenPackage.tokens,
+      balanceBefore: currentTotal,
+      balanceAfter: currentTotal + tokenPackage.tokens,
       metadata: {
         userAgent,
         ipAddress,
         purchaseReason: "token_topup",
-        expiresAt: new Date(
-          Date.now() + tokenPackage.metadata.validityHours * 60 * 60 * 1000
-        ),
+        expiresAt: user.subscription.endDate, // Changed: expires with plan
       },
     });
 
     await transaction.save({ session });
 
-    // Create payment order (using dummy payment system)
-    const baseUrl =
-      process.env.BACKEND_URL ||
-      (process.env.NODE_ENV === "production"
-        ? process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : "https://client-sure-backend.vercel.app"
-        : `http://localhost:${process.env.PORT || 5000}`);
+    // Create Razorpay Order
+    // Amount in paisa (INR * 100)
+    const amountInPaisa = Math.round(tokenPackage.price * 100);
+    const razorpayOrder = await razorpayService.createOrder({
+      amount: amountInPaisa,
+      receipt: transactionId,
+      notes: {
+        transactionId: transaction._id.toString(),
+        type: "token_purchase",
+        packageId: tokenPackage._id.toString(),
+        userId: userId.toString(),
+      },
+    });
 
-    const paymentPayload = {
-      checkoutUrl: `${baseUrl}/api/dummy-token-checkout?transaction=${transaction.transactionId}`,
-      checkoutToken: `token-${Date.now()}`,
-      orderAmount: tokenPackage.price,
-      userEmail: user.email,
-      userName: user.name,
-      transactionId: transaction.transactionId,
-    };
+    // Update transaction with Razorpay Order ID
+    transaction.razorpayOrderId = razorpayOrder.id;
+    await transaction.save({ session });
 
     await session.commitTransaction();
 
     console.log(
-      `Token purchase order created: ${transaction.transactionId} for ${user.email}`
+      `Token purchase order created: ${transaction.transactionId} for ${user.email} (Razorpay Order: ${razorpayOrder.id})`,
     );
 
     res.json({
@@ -164,7 +168,14 @@ export const createTokenPurchase = async (req, res) => {
         packageName: tokenPackage.name,
         expiresAt: transaction.metadata.expiresAt,
       },
-      paymentPayload,
+      paymentDetails: {
+        orderId: razorpayOrder.id,
+        amount: amountInPaisa,
+        currency: razorpayOrder.currency,
+        key: process.env.RAZORPAY_KEY_ID,
+        name: "Client Sure",
+        description: `Purchase ${tokenPackage.tokens} Tokens`,
+      },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -215,9 +226,9 @@ export const processTokenPurchase = async (req, res) => {
       // Update transaction
       transaction.status = "completed";
       transaction.paymentDetails.paymentId = paymentId;
-      await transaction.save({ session });
+      transaction.completedAt = new Date();
 
-      // Credit tokens to user
+      // Update balance before/after
       const user = await User.findById(transaction.userId).session(session);
       if (!user) {
         await session.abortTransaction();
@@ -227,33 +238,30 @@ export const processTokenPurchase = async (req, res) => {
         });
       }
 
-      // Add tokens using Approach 1 (existing field)
-      user.tokens += transaction.tokens;
-      await user.save({ session });
+      const balanceBefore = calculateTotalTokens(user);
+      transaction.balanceBefore = balanceBefore;
 
+      await transaction.save({ session });
       await session.commitTransaction();
 
-      // Create notification for successful token purchase
-      const tokenPackage = await TokenPackage.findById(transaction.packageId);
-      const notificationMessage = `🎉 Token purchase successful! ${transaction.tokens} tokens from ${tokenPackage.name} package have been added to your account.`;
-
-      await createNotification(
+      // Add tokens using enhanced token utils (outside transaction)
+      const result = await addPurchasedTokens(
         user._id,
-        "token_purchase",
-        notificationMessage,
-        null,
-        null
+        transaction.tokens,
+        transaction._id,
       );
 
       console.log(
-        `Tokens credited: ${transaction.tokens} tokens to ${user.email}`
+        `Tokens credited: ${transaction.tokens} tokens to ${user.email}`,
       );
 
       res.json({
         success: true,
         message: "Tokens credited successfully",
         tokensAdded: transaction.tokens,
-        newBalance: user.tokens,
+        newBalance: result.currentBalance,
+        totalPurchased: result.totalPurchased,
+        expiresAt: result.expiresAt,
       });
     } else {
       // Mark as failed
@@ -295,7 +303,7 @@ export const getTokenHistory = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .select(
-        "transactionId tokens amount status createdAt metadata.expiresAt"
+        "transactionId tokens amount status createdAt metadata.expiresAt",
       );
 
     const total = await TokenTransaction.countDocuments({ userId });
@@ -338,7 +346,9 @@ export const getTokenBalance = async (req, res) => {
 
     const user = await User.findById(userId)
       .populate("subscription.planId", "name dailyTokens")
-      .select("tokens tokensUsedToday subscription");
+      .select(
+        "tokens tokensUsedToday subscription dailyTokens purchasedTokens bonusTokens prizeTokens",
+      );
 
     if (!user) {
       return res.status(404).json({
@@ -347,25 +357,33 @@ export const getTokenBalance = async (req, res) => {
       });
     }
 
-    // Calculate extra tokens (tokens above daily limit)
-    const dailyLimit = user.subscription.dailyTokens || 100;
-    const extraTokens = Math.max(0, user.tokens - dailyLimit);
-    const regularTokens = Math.min(user.tokens, dailyLimit);
+    // Get enhanced token breakdown
+    const breakdown = getTokenBreakdown(user);
 
     res.json({
       success: true,
+      breakdown,
+      // Legacy format for backward compatibility
       balance: {
-        total: user.tokens,
-        regular: regularTokens,
-        extra: extraTokens,
-        used: user.tokensUsedToday || 0,
-        dailyLimit: dailyLimit,
-        hasExtraTokens: extraTokens > 0,
+        total: breakdown.total,
+        regular: breakdown.daily.current,
+        extra:
+          breakdown.purchased.current +
+          breakdown.bonus.current +
+          breakdown.prize.current,
+        used: breakdown.daily.usedToday,
+        dailyLimit: breakdown.daily.limit,
+        hasExtraTokens:
+          breakdown.purchased.current +
+            breakdown.bonus.current +
+            breakdown.prize.current >
+          0,
       },
       subscription: {
         planName: user.subscription.planId?.name || "No Plan",
-        isActive:
-          user.subscription.endDate && user.subscription.endDate > new Date(),
+        isActive: breakdown.planExpiry.isActive,
+        endDate: breakdown.planExpiry.endDate,
+        daysRemaining: breakdown.planExpiry.daysRemaining,
       },
     });
   } catch (error) {

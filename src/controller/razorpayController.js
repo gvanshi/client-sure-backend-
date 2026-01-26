@@ -4,6 +4,7 @@ import {
   User,
   TokenTransaction,
   TokenPackage,
+  Session,
 } from "../models/index.js";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
@@ -14,6 +15,8 @@ import {
   updateReferralStats,
   processReferralReward,
 } from "../utils/referralUtils.js";
+import jwt from "jsonwebtoken";
+import { v4 as uuidv4 } from "uuid";
 
 /**
  * Razorpay Controller
@@ -129,6 +132,12 @@ export const verifySubscriptionPayment = async (req, res) => {
           monthlyTokensTotal: monthlyAllocation,
           monthlyTokensUsed: 0,
           monthlyTokensRemaining: monthlyAllocation,
+          bonusTokens: {
+            current: plan.bonusTokens || 0,
+            initial: plan.bonusTokens || 0,
+            used: 0,
+            grantedAt: plan.bonusTokens > 0 ? new Date() : null,
+          },
           referralCode: newReferralCode,
           referredBy: referrer ? referrer._id : null,
           referralStats: {
@@ -204,8 +213,19 @@ export const verifySubscriptionPayment = async (req, res) => {
         user.monthlyTokensTotal = monthlyAllocation;
         user.monthlyTokensRemaining = monthlyAllocation;
 
+        // Grant bonus tokens from plan
+        user.bonusTokens = {
+          current: plan.bonusTokens || 0,
+          initial: plan.bonusTokens || 0,
+          used: 0,
+          grantedAt: plan.bonusTokens > 0 ? new Date() : null,
+        };
+
         await user.save();
         console.log("User subscription updated/activated:", user.email);
+        console.log(
+          `Granted ${plan.bonusTokens || 0} bonus tokens to ${user.email}`,
+        );
 
         // Handle referral reward for existing users renewal/payment
         if (user.referredBy) {
@@ -220,9 +240,58 @@ export const verifySubscriptionPayment = async (req, res) => {
     await order.save();
     console.log("Subscription payment verified and completed:", orderId);
 
+    // Generate Session and Token for Auto-Login
+    const sessionId = uuidv4();
+    const userAgent = req.headers["user-agent"] || "Unknown Device";
+    const newSession = new Session({
+      userId: user._id,
+      sessionId: sessionId,
+      deviceId: `payment-${orderId}`, // Use order ID as unique device identifier
+      deviceName: userAgent.includes("Mobile")
+        ? "Mobile Browser"
+        : "Desktop Browser",
+      platform: "web",
+      ipAddress: req.ip || req.connection.remoteAddress || "Unknown IP",
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    });
+    await newSession.save();
+
+    const token = jwt.sign(
+      {
+        payload: {
+          userId: user._id,
+          email: user.email,
+          planId: user.subscription.planId,
+          sessionId: sessionId,
+        },
+        userId: user._id,
+        email: user.email,
+        planId: user.subscription.planId,
+        sessionId: sessionId,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" },
+    );
+
+    // Set HTTP-only cookie
+    res.cookie("userToken", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
     res.json({
       success: true,
       message: "Payment verified and subscription activated",
+      token: token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        subscription: user.subscription,
+      },
     });
   } catch (error) {
     console.error("Verify subscription error:", error);

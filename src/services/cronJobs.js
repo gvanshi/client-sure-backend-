@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { User } from "../models/index.js";
+import { cleanExpiredTokens } from "../utils/enhancedTokenUtils.js";
 import {
   sendExpiryWarningEmail,
   sendSubscriptionExpiredEmail,
@@ -31,8 +32,32 @@ export const startTokenRefreshCron = () => {
             user.subscription.endDate > now;
 
           if (isActive) {
-            // Active subscription - reset daily tokens only
+            // Active subscription - reset daily tokens only, keep purchased/bonus/prize
             const plan = user.subscription.planId;
+            const dailyLimit = plan ? plan.dailyTokens : 100;
+
+            // Initialize dailyTokens if not exists
+            if (!user.dailyTokens) {
+              user.dailyTokens = {
+                current: dailyLimit,
+                limit: dailyLimit,
+                usedToday: 0,
+                lastRefreshedAt: now,
+              };
+            } else {
+              // Reset daily tokens
+              user.dailyTokens.current = dailyLimit;
+              user.dailyTokens.limit = dailyLimit;
+              user.dailyTokens.usedToday = 0;
+              user.dailyTokens.lastRefreshedAt = now;
+            }
+
+            // Reset daily stats in tokenStats
+            if (user.tokenStats) {
+              user.tokenStats.dailyUsed = 0;
+            }
+
+            // Update legacy fields for backward compatibility
             user.tokens = plan ? plan.dailyTokens : 100;
             user.tokensUsedToday = 0;
             user.subscription.lastRefreshedAt = now;
@@ -45,22 +70,7 @@ export const startTokenRefreshCron = () => {
               comments: 0,
             };
 
-            // Clean expired temporary tokens
-            if (user.temporaryTokens && user.temporaryTokens.expiresAt) {
-              const expiryTime = new Date(user.temporaryTokens.expiresAt);
-              if (now > expiryTime) {
-                console.log(
-                  `Clearing expired prize tokens for ${user.email}: ${user.temporaryTokens.amount} ${user.temporaryTokens.prizeType} tokens`
-                );
-                user.temporaryTokens = {
-                  amount: 0,
-                  grantedAt: null,
-                  expiresAt: null,
-                  grantedBy: null,
-                  prizeType: null,
-                };
-              }
-            }
+            // NOTE: purchased/bonus/prize tokens remain unchanged!
 
             await user.save();
             refreshedCount++;
@@ -68,38 +78,21 @@ export const startTokenRefreshCron = () => {
             user.subscription.endDate &&
             user.subscription.endDate <= now
           ) {
-            // Expired subscription - check for auto-renewal
-            const plan = user.subscription.planId;
+            // Expired subscription - clean ALL tokens (daily, purchased, bonus, prize)
+            console.log(`Plan expired for ${user.email}, cleaning all tokens`);
 
-            if (plan) {
-              // Auto-renew the plan (reset monthly tokens)
-              const monthlyAllocation = plan.durationDays * plan.dailyTokens;
+            await cleanExpiredTokens(user);
 
-              user.tokens = plan.dailyTokens;
-              user.tokensUsedToday = 0;
-              user.monthlyTokensTotal = monthlyAllocation;
-              user.monthlyTokensUsed = 0;
-              user.monthlyTokensRemaining = monthlyAllocation;
+            // Deactivate subscription
+            user.subscription.isActive = false;
 
-              // Extend subscription
-              user.subscription.startDate = now;
-              user.subscription.endDate = new Date(
-                now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
-              );
-              user.subscription.lastRefreshedAt = now;
-
-              await user.save();
-              renewedCount++;
-
-              console.log(
-                `🔄 Auto-renewed plan for ${user.email}: ${monthlyAllocation} monthly tokens`
-              );
-            }
+            await user.save();
+            renewedCount++;
           }
         }
 
         console.log(
-          `Token refresh completed: ${refreshedCount} daily refreshed, ${renewedCount} plans renewed at ${now.toISOString()}`
+          `Token refresh completed: ${refreshedCount} daily refreshed, ${renewedCount} plans renewed at ${now.toISOString()}`,
         );
       } catch (error) {
         console.error("Token refresh cron error:", error);
@@ -107,11 +100,11 @@ export const startTokenRefreshCron = () => {
     },
     {
       timezone: "Asia/Kolkata",
-    }
+    },
   );
 
   console.log(
-    "Daily token refresh + auto plan renewal cron job started (12:00 AM IST)"
+    "Daily token refresh + auto plan renewal cron job started (12:00 AM IST)",
   );
 };
 
@@ -127,7 +120,7 @@ export const startSubscriptionExpiryCron = () => {
         const today = new Date(
           now.getFullYear(),
           now.getMonth(),
-          now.getDate()
+          now.getDate(),
         );
 
         // Find users with subscriptions
@@ -147,7 +140,7 @@ export const startSubscriptionExpiryCron = () => {
           const endDateOnly = new Date(
             endDate.getFullYear(),
             endDate.getMonth(),
-            endDate.getDate()
+            endDate.getDate(),
           );
           const diffTime = endDateOnly.getTime() - today.getTime();
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -157,7 +150,7 @@ export const startSubscriptionExpiryCron = () => {
             await sendExpiryWarningEmail(user, diffDays);
             warningsSent++;
             console.log(
-              `⚠️ Expiry warning sent to ${user.email} (${diffDays} days left)`
+              `⚠️ Expiry warning sent to ${user.email} (${diffDays} days left)`,
             );
           }
 
@@ -175,7 +168,7 @@ export const startSubscriptionExpiryCron = () => {
             deactivatedCount++;
             expiredNotified++;
             console.log(
-              `🔴 Subscription expired and deactivated for ${user.email}`
+              `🔴 Subscription expired and deactivated for ${user.email}`,
             );
           }
 
@@ -188,13 +181,13 @@ export const startSubscriptionExpiryCron = () => {
             await sendRenewalReminderEmail(user, daysExpired);
             remindersSet++;
             console.log(
-              `💙 Renewal reminder sent to ${user.email} (${daysExpired} days expired)`
+              `💙 Renewal reminder sent to ${user.email} (${daysExpired} days expired)`,
             );
           }
         }
 
         console.log(
-          `Subscription monitoring completed: ${warningsSent} warnings, ${expiredNotified} expired notifications, ${remindersSet} reminders, ${deactivatedCount} deactivated at ${now.toISOString()}`
+          `Subscription monitoring completed: ${warningsSent} warnings, ${expiredNotified} expired notifications, ${remindersSet} reminders, ${deactivatedCount} deactivated at ${now.toISOString()}`,
         );
       } catch (error) {
         console.error("Subscription expiry monitoring error:", error);
@@ -202,7 +195,7 @@ export const startSubscriptionExpiryCron = () => {
     },
     {
       timezone: "Asia/Kolkata",
-    }
+    },
   );
 
   console.log("Subscription expiry monitoring cron job started (02:00 IST)");
@@ -234,7 +227,7 @@ export const manualTokenRefresh = async () => {
       refreshedCount++;
 
       console.log(
-        `Refreshed daily tokens for ${user.email}: ${user.tokens} tokens (Monthly: ${user.monthlyTokensRemaining})`
+        `Refreshed daily tokens for ${user.email}: ${user.tokens} tokens (Monthly: ${user.monthlyTokensRemaining})`,
       );
     }
 
@@ -274,7 +267,7 @@ export const manualSubscriptionCheck = async (userEmail = null) => {
       const endDateOnly = new Date(
         endDate.getFullYear(),
         endDate.getMonth(),
-        endDate.getDate()
+        endDate.getDate(),
       );
       const diffTime = endDateOnly.getTime() - today.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -317,7 +310,7 @@ export const manualPlanRenewal = async (userEmail) => {
     console.log(`Manual plan renewal for: ${userEmail}`);
 
     const user = await User.findOne({ email: userEmail }).populate(
-      "subscription.planId"
+      "subscription.planId",
     );
 
     if (!user) {
@@ -342,14 +335,14 @@ export const manualPlanRenewal = async (userEmail) => {
     // Extend subscription
     user.subscription.startDate = now;
     user.subscription.endDate = new Date(
-      now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+      now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
     );
     user.subscription.lastRefreshedAt = now;
 
     await user.save();
 
     console.log(
-      `✅ Plan renewed for ${userEmail}: ${monthlyAllocation} monthly tokens`
+      `✅ Plan renewed for ${userEmail}: ${monthlyAllocation} monthly tokens`,
     );
     return {
       success: true,

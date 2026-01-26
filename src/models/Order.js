@@ -62,33 +62,30 @@ const orderSchema = new mongoose.Schema(
       required: false,
       trim: true,
     },
-    // PhonePe specific fields
-    merchantOrderId: {
+    // Razorpay specific fields
+    razorpayOrderId: {
       type: String,
       required: false,
       sparse: true,
       index: true,
     },
-    phonePeOrderId: {
+    razorpayPaymentId: {
       type: String,
       required: false,
     },
-    phonePeTransactionId: {
+    razorpaySignature: {
       type: String,
       required: false,
     },
-    paymentMode: {
+    currency: {
       type: String,
-      required: false, // UPI_QR, UPI_INTENT, CARD, etc.
+      default: "INR",
     },
-    paymentRail: {
-      type: mongoose.Schema.Types.Mixed,
-      required: false, // UPI details, card details, etc.
-    },
-    failureReason: {
+    errorReason: {
       type: String,
       required: false,
     },
+
     completedAt: {
       type: Date,
       required: false,

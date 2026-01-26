@@ -177,14 +177,20 @@ export const register = async (req, res) => {
 };
 
 // POST /api/auth/login
+// POST /api/auth/login
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, deviceId, deviceName, platform } = req.body;
 
-    // Validate required fields
+    // Validate email and password are required
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
     }
+
+    // Default device info if not provided
+    const userDeviceId = deviceId || "unknown-device-" + uuidv4();
+    const userDeviceName = deviceName || "Unknown Device";
+    const userPlatform = platform || "web";
 
     // --------------------------------------------
     // ADMIN CHECK
@@ -192,13 +198,11 @@ export const login = async (req, res) => {
     const admin = await Admin.findOne({ email: email.toLowerCase() });
 
     if (admin) {
-      // Check admin password
       const isValidAdminPassword = await bcrypt.compare(
         password,
         admin.passwordHash,
       );
       if (isValidAdminPassword) {
-        // Generate Admin Token
         const token = jwt.sign(
           {
             username: admin.name,
@@ -210,7 +214,6 @@ export const login = async (req, res) => {
           { expiresIn: "24h" },
         );
 
-        // Set HttpOnly cookie for admin (if used)
         res.cookie("adminToken", token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
@@ -223,7 +226,7 @@ export const login = async (req, res) => {
         return res.json({
           message: "Admin login successful",
           role: "admin",
-          userToken: token, // Returning as userToken to match frontend expectations or generic token field
+          userToken: token,
           token: token,
           user: {
             id: admin._id,
@@ -233,7 +236,6 @@ export const login = async (req, res) => {
           },
         });
       }
-      // If admin found but password invalid, return error immediately
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -241,7 +243,6 @@ export const login = async (req, res) => {
     // USER CHECK (If not Admin)
     // --------------------------------------------
 
-    // Find user
     const user = await User.findOne({ email: email.toLowerCase() }).populate(
       "subscription.planId",
     );
@@ -249,20 +250,17 @@ export const login = async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Check if user has set password
     if (!user.passwordHash) {
       return res
         .status(401)
         .json({ error: "Please set your password first using the email link" });
     }
 
-    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Check if subscription is active
     const now = new Date();
     if (user.subscription.endDate && user.subscription.endDate < now) {
       return res
@@ -271,86 +269,114 @@ export const login = async (req, res) => {
     }
 
     // ============================================
-    // TWO-DEVICE SESSION MANAGEMENT (FIFO)
+    // STRICT 2-DEVICE SESSION MANAGEMENT
     // ============================================
 
-    // 1. Fetch all active sessions for this user (sorted by creation time, oldest first)
-    const existingSessions = await Session.find({ userId: user._id })
-      .sort({ createdAt: 1 }) // Oldest first (FIFO)
-      .exec();
+    // 1. Fetch all active sessions for this user
+    const existingSessions = await Session.find({ userId: user._id }).exec();
 
-    console.log(
-      `User ${user.email} has ${existingSessions.length} active session(s)`,
+    // 2. Check if this device already exists
+    const currentDeviceSession = existingSessions.find(
+      (s) => s.deviceId === userDeviceId,
     );
 
-    // 2. If user already has 2 or more sessions, delete the oldest one
-    if (existingSessions.length >= 2) {
-      const oldestSession = existingSessions[0];
-      await Session.findByIdAndDelete(oldestSession._id);
+    let sessionId;
+    if (currentDeviceSession) {
+      // 2a. REFRESH EXISTING SESSION
       console.log(
-        `🔄 Revoked oldest session for ${user.email} (sessionId: ${oldestSession.sessionId})`,
+        `♻️ Device ${userDeviceName} (${userDeviceId}) already active. Refreshing session.`,
+      );
+      sessionId = currentDeviceSession.sessionId;
+      currentDeviceSession.lastActiveAt = new Date();
+      currentDeviceSession.ipAddress =
+        req.ip || req.connection.remoteAddress || "Unknown IP";
+      await currentDeviceSession.save();
+    } else {
+      // 2b. CHECK DEVICE LIMIT (Max 2)
+      if (existingSessions.length >= 2) {
+        console.log(
+          `⛔ Device limit exceeded for user ${user.email} (${existingSessions.length} active sessions)`,
+        );
+
+        // Return 409 Conflict with list of active sessions and userId
+        return res.status(409).json({
+          error: "Device limit exceeded",
+          message: "You are logged in on 2 devices. Choose one to log out.",
+          userId: user._id,
+          devices: existingSessions.map((s) => ({
+            sessionId: s.sessionId,
+            deviceName: s.deviceName,
+            platform: s.platform,
+            lastActiveAt: s.lastActiveAt,
+          })),
+        });
+      }
+
+      // 2c. CREATE NEW SESSION
+      sessionId = uuidv4();
+      const ipAddress = req.ip || req.connection.remoteAddress || "Unknown IP";
+
+      const newSession = new Session({
+        userId: user._id,
+        sessionId: sessionId,
+        deviceId: userDeviceId,
+        deviceName: userDeviceName,
+        platform: userPlatform,
+        ipAddress: ipAddress,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
+
+      await newSession.save();
+      console.log(
+        `✅ New session created for ${user.email} on ${userDeviceName}`,
       );
     }
 
-    // 3. Generate new sessionId using UUID
-    const sessionId = uuidv4();
-
-    // 4. Extract device info and IP address
-    const deviceInfo = req.headers["user-agent"] || "Unknown Device";
-    const ipAddress = req.ip || req.connection.remoteAddress || "Unknown IP";
-
-    // 5. Create new session in MongoDB
-    const newSession = new Session({
-      userId: user._id,
-      sessionId: sessionId,
-      deviceInfo: deviceInfo,
-      ipAddress: ipAddress,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-    });
-
-    // Update lastLogin timestamp
+    // Update user last login
     user.lastLogin = new Date();
     await user.save();
-
-    await newSession.save();
-    console.log(
-      `✅ New session created for ${user.email} (sessionId: ${sessionId})`,
-    );
 
     // ============================================
     // GENERATE JWT WITH SESSION ID
     // ============================================
 
-    // Generate JWT token with sessionId embedded (15 minutes expiry)
     const token = jwt.sign(
       {
         payload: {
           userId: user._id,
           email: user.email,
           planId: user.subscription.planId?._id,
-          sessionId: sessionId, // CRITICAL: Session ID for validation
+          sessionId: sessionId,
         },
         userId: user._id,
         email: user.email,
         planId: user.subscription.planId?._id,
-        sessionId: sessionId, // CRITICAL: Session ID for validation
+        sessionId: sessionId,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }, // Short-lived token for security
+      { expiresIn: "7d" },
     );
 
-    console.log(`User logged in: ${user.email}`);
+    // Update session with token (optional storage)
+    if (currentDeviceSession) {
+      currentDeviceSession.token = token;
+      await currentDeviceSession.save();
+    } else {
+      const sessionToUpdate = await Session.findOne({ sessionId });
+      if (sessionToUpdate) {
+        sessionToUpdate.token = token;
+        await sessionToUpdate.save();
+      }
+    }
 
-    // Set HTTP-only cookie
     res.cookie("userToken", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 15 * 60 * 1000, // 15 minutes to match JWT expiry
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // Return user info with session details
     res.json({
       user: {
         id: user._id,
@@ -367,8 +393,8 @@ export const login = async (req, res) => {
       },
       userToken: token,
       sessionInfo: {
-        deviceInfo: deviceInfo,
-        activeSessions: Math.min(existingSessions.length + 1, 2), // Max 2
+        sessionId: sessionId,
+        deviceId: userDeviceId,
       },
     });
   } catch (error) {
@@ -776,8 +802,12 @@ export const getUserProfile = async (req, res) => {
         email: user.email,
         phone: user.phone,
         avatar: user.avatar,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
       tokens: {
+        // Daily tokens (old system compatibility)
         daily: user.tokens,
         dailyUsed: user.tokensUsedToday || 0,
         dailyLimit: user.subscription.dailyTokens || 100,
@@ -785,11 +815,49 @@ export const getUserProfile = async (req, res) => {
         monthlyUsed: user.monthlyTokensUsed,
         monthlyRemaining: user.monthlyTokensRemaining,
         totalUsed: user.tokensUsedTotal,
+        // Enhanced daily tokens system
+        dailyTokensEnhanced: {
+          current: user.dailyTokens?.current || 0,
+          limit: user.dailyTokens?.limit || 100,
+          usedToday: user.dailyTokens?.usedToday || 0,
+          lastRefreshedAt: user.dailyTokens?.lastRefreshedAt || null,
+        },
+        // Purchased tokens
+        purchasedTokens: {
+          current: user.purchasedTokens?.current || 0,
+          total: user.purchasedTokens?.total || 0,
+          used: user.purchasedTokens?.used || 0,
+          lastPurchasedAt: user.purchasedTokens?.lastPurchasedAt || null,
+          expiresAt: user.purchasedTokens?.expiresAt || null,
+        },
+        // Bonus token information
+        bonusTokens: user.bonusTokens?.current || 0,
+        bonusTokensInitial: user.bonusTokens?.initial || 0,
+        bonusTokensUsed: user.bonusTokens?.used || 0,
+        bonusTokensGrantedAt: user.bonusTokens?.grantedAt || null,
         // Prize token information
         prizeTokens: user.temporaryTokens?.amount || 0,
         prizeTokenType: user.temporaryTokens?.prizeType || null,
         prizeTokenExpiresAt: user.temporaryTokens?.expiresAt || null,
         prizeTokenTimeRemaining: prizeTokenTimeRemaining,
+        // Prize tokens (enhanced system)
+        prizeTokensEnhanced: {
+          current: user.prizeTokens?.current || 0,
+          used: user.prizeTokens?.used || 0,
+          grantedAt: user.prizeTokens?.grantedAt || null,
+          expiresAt: user.prizeTokens?.expiresAt || null,
+          grantedBy: user.prizeTokens?.grantedBy || null,
+          prizeType: user.prizeTokens?.prizeType || null,
+        },
+        // Token usage statistics
+        tokenStats: {
+          totalUsed: user.tokenStats?.totalUsed || 0,
+          dailyUsed: user.tokenStats?.dailyUsed || 0,
+          purchasedUsed: user.tokenStats?.purchasedUsed || 0,
+          bonusUsed: user.tokenStats?.bonusUsed || 0,
+          prizeUsed: user.tokenStats?.prizeUsed || 0,
+          planPeriodUsed: user.tokenStats?.planPeriodUsed || 0,
+        },
         // Effective total tokens
         effectiveTokens: effectiveTokens,
       },
@@ -799,6 +867,9 @@ export const getUserProfile = async (req, res) => {
               id: user.subscription.planId._id,
               name: user.subscription.planId.name,
               price: user.subscription.planId.price,
+              durationDays: user.subscription.planId.durationDays,
+              dailyTokens: user.subscription.planId.dailyTokens,
+              bonusTokens: user.subscription.planId.bonusTokens,
             }
           : null,
         startDate: user.subscription.startDate,
@@ -806,9 +877,149 @@ export const getUserProfile = async (req, res) => {
         isActive: user.subscription.endDate
           ? new Date() < user.subscription.endDate
           : false,
+        daysRemaining: user.subscription.endDate
+          ? Math.max(
+              0,
+              Math.ceil(
+                (new Date(user.subscription.endDate) - new Date()) /
+                  (1000 * 60 * 60 * 24),
+              ),
+            )
+          : 0,
+      },
+      referral: {
+        code: user.referralCode || null,
+        referredBy: user.referredBy || null,
+        stats: {
+          totalReferrals: user.referralStats?.totalReferrals || 0,
+          activeReferrals: user.referralStats?.activeReferrals || 0,
+          totalEarnings: user.referralStats?.totalEarnings || 0,
+        },
+        milestoneRewards: {
+          referral8Cycles: user.milestoneRewards?.referral8Cycles || 0,
+          referral15Cycles: user.milestoneRewards?.referral15Cycles || 0,
+          referral25Cycles: user.milestoneRewards?.referral25Cycles || 0,
+          totalTokensEarned: user.milestoneRewards?.totalTokensEarned || 0,
+        },
+      },
+      community: {
+        points: user.points || 0,
+        activity: {
+          postsCreated: user.communityActivity?.postsCreated || 0,
+          commentsMade: user.communityActivity?.commentsMade || 0,
+          likesGiven: user.communityActivity?.likesGiven || 0,
+          likesReceived: user.communityActivity?.likesReceived || 0,
+        },
+        unreadNotifications: user.unreadNotificationCount || 0,
+      },
+      access: {
+        resourcesAccessed: user.accessedResources?.length || 0,
+        leadsAccessed: user.accessedLeads?.length || 0,
       },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+// PUT /api/auth/change-password
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.userId;
+
+    if (!currentPassword || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "Current and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if user has set password
+    if (!user.passwordHash) {
+      return res.status(400).json({ error: "Please set your password first" });
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash,
+    );
+    if (!isValidPassword) {
+      return res.status(401).json({ error: "Incorrect current password" });
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+
+    user.passwordHash = passwordHash;
+    await user.save();
+
+    console.log(`Password changed successfully for user: ${user.email}`);
+    res.json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// POST /api/auth/logout-device
+export const logoutDevice = async (req, res) => {
+  try {
+    const { sessionId, userId } = req.body;
+
+    console.log(`🔍 Logout device request:`, { sessionId, userId });
+
+    if (!sessionId) {
+      return res.status(400).json({ error: "Session ID is required" });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+
+    // Find the session first to validate ownership
+    const session = await Session.findOne({ sessionId });
+
+    if (!session) {
+      console.log(`❌ Session not found: ${sessionId}`);
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    // Validate that the session belongs to the specified user
+    if (session.userId.toString() !== userId) {
+      console.log(
+        `⚠️ Session ownership mismatch: sessionId=${sessionId}, expected userId=${userId}, actual userId=${session.userId}`,
+      );
+      return res
+        .status(403)
+        .json({ error: "Unauthorized: Session does not belong to this user" });
+    }
+
+    // Delete the session
+    await Session.findOneAndDelete({ sessionId });
+
+    console.log(
+      `🔓 Device session deleted successfully (sessionId: ${sessionId}, userId: ${userId}, device: ${session.deviceName})`,
+    );
+
+    res.json({
+      message: "Device logged out successfully",
+      deviceName: session.deviceName,
+    });
+  } catch (error) {
+    console.error("Logout device error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 };

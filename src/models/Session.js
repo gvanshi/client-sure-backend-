@@ -14,10 +14,25 @@ const sessionSchema = new mongoose.Schema(
       unique: true,
       index: true, // Fast lookup by sessionId
     },
-    deviceInfo: {
+    deviceId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    deviceName: {
       type: String,
       required: true,
       trim: true,
+    },
+    platform: {
+      type: String,
+      required: true,
+      enum: ["web", "android", "ios", "unknown"],
+      default: "web",
+    },
+    token: {
+      type: String,
+      // required: true, // Optional if you only want to track sessions without storing full JWT
     },
     ipAddress: {
       type: String,
