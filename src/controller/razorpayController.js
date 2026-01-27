@@ -257,6 +257,10 @@ export const verifySubscriptionPayment = async (req, res) => {
     });
     await newSession.save();
 
+    // Update user last login
+    user.lastLogin = new Date();
+    await user.save();
+
     const token = jwt.sign(
       {
         payload: {
@@ -350,7 +354,25 @@ export const verifyTokenPurchasePayment = async (req, res) => {
     // Add tokens
     const user = await User.findById(transaction.userId);
     if (user) {
-      user.tokens += transaction.tokens;
+      user.tokens = (user.tokens || 0) + transaction.tokens;
+
+      // Update Enhanced Token Stats
+      if (!user.purchasedTokens) {
+        user.purchasedTokens = {
+          current: 0,
+          total: 0,
+          used: 0,
+          lastPurchasedAt: null,
+          expiresAt: null,
+        };
+      }
+
+      user.purchasedTokens.current =
+        (user.purchasedTokens.current || 0) + transaction.tokens;
+      user.purchasedTokens.total =
+        (user.purchasedTokens.total || 0) + transaction.tokens;
+      user.purchasedTokens.lastPurchasedAt = new Date();
+
       await user.save();
     }
 

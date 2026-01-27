@@ -111,6 +111,7 @@ export const register = async (req, res) => {
         dailyTokens: 0,
         endDate: null,
       },
+      lastLogin: new Date(),
     });
 
     await user.save();
@@ -259,6 +260,13 @@ export const login = async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // Check for active subscription/account status
+    if (user.subscription && user.subscription.isActive === false) {
+      return res.status(403).json({
+        error: "Your account has been deactivated. Please contact support.",
+      });
     }
 
     const now = new Date();
@@ -415,10 +423,8 @@ export const requestReset = async (req, res) => {
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // Security: Don't reveal if user exists or not
-      return res.json({
-        message:
-          "If your email is registered, you will receive a password reset link shortly.",
+      return res.status(404).json({
+        error: "You are not registered or email do not exist check you email",
       });
     }
 
@@ -810,7 +816,10 @@ export const getUserProfile = async (req, res) => {
         // Daily tokens (old system compatibility)
         daily: user.tokens,
         dailyUsed: user.tokensUsedToday || 0,
-        dailyLimit: user.subscription.dailyTokens || 100,
+        dailyLimit: Math.max(
+          user.subscription.dailyTokens || 100,
+          (user.tokens || 0) + (user.tokensUsedToday || 0),
+        ),
         monthlyTotal: user.monthlyTokensTotal,
         monthlyUsed: user.monthlyTokensUsed,
         monthlyRemaining: user.monthlyTokensRemaining,

@@ -93,7 +93,7 @@ router.post(
   "/resources",
   authenticateAdmin,
   upload.single("file"),
-  createResource
+  createResource,
 );
 router.get("/resources", authenticateAdmin, getResources);
 router.get("/resources/:id", authenticateAdmin, getResource);
@@ -101,7 +101,7 @@ router.put(
   "/resources/:id",
   authenticateAdmin,
   upload.single("file"),
-  updateResource
+  updateResource,
 );
 router.delete("/resources/:id", authenticateAdmin, deleteResource);
 
@@ -116,7 +116,7 @@ router.post(
   "/leads/upload",
   authenticateAdmin,
   excelUpload.single("file"),
-  uploadLeads
+  uploadLeads,
 );
 router.get("/leads", authenticateAdmin, getLeads);
 router.get("/get-lead/:id", authenticateAdmin, getLead);
@@ -135,7 +135,7 @@ router.delete("/community/post/:postId", authenticateAdmin, deletePostAdmin);
 router.delete(
   "/community/comment/:commentId",
   authenticateAdmin,
-  deleteCommentAdmin
+  deleteCommentAdmin,
 );
 
 // Community data for admin dashboard
@@ -145,12 +145,12 @@ router.post("/community/fix-sync", authenticateAdmin, fixLeaderboardSync);
 router.get(
   "/community/user/:userId/prize-history",
   authenticateAdmin,
-  getUserPrizeHistory
+  getUserPrizeHistory,
 );
 router.get(
   "/community/prize-history/all",
   authenticateAdmin,
-  getAllPrizeHistory
+  getAllPrizeHistory,
 );
 
 // Prize token management
@@ -165,7 +165,7 @@ router.get("/referrals/referrer/:id", authenticateAdmin, getReferrerDetails);
 router.get(
   "/referrals/referred-user/:id",
   authenticateAdmin,
-  getReferredUserDetails
+  getReferredUserDetails,
 );
 
 // Email management
@@ -185,7 +185,7 @@ router.post("/referral-rewards/award", authenticateAdmin, awardReferralReward);
 router.get(
   "/referral-rewards/analytics",
   authenticateAdmin,
-  getReferralRewardAnalytics
+  getReferralRewardAnalytics,
 );
 
 // Prize management
