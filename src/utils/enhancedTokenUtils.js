@@ -166,6 +166,16 @@ export const deductTokens = async (
     // Update legacy fields for backward compatibility
     user.tokensUsedTotal = user.tokenStats.totalUsed;
     user.tokensUsedToday = user.dailyTokens.usedToday;
+
+    // Update monthly stats (Legacy/Flat structure)
+    user.monthlyTokensUsed = (user.monthlyTokensUsed || 0) + tokensToDeduct;
+    if (user.monthlyTokensRemaining > 0) {
+      user.monthlyTokensRemaining = Math.max(
+        0,
+        user.monthlyTokensRemaining - tokensToDeduct,
+      );
+    }
+
     user.tokens = calculateTotalTokens(user);
 
     await user.save();

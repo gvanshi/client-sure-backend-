@@ -55,6 +55,10 @@ export const deductTokensWithPriority = async (userId, tokensToDeduct) => {
     user.tokensUsedTotal = (user.tokensUsedTotal || 0) + tokensToDeduct;
 
     // Update monthly stats
+    console.log(
+      `[DEBUG] Before Update - MonthlyRemaining: ${user.monthlyTokensRemaining}, MonthlyUsed: ${user.monthlyTokensUsed}, Deduct: ${tokensToDeduct}`,
+    );
+
     user.monthlyTokensUsed = (user.monthlyTokensUsed || 0) + tokensToDeduct;
     if (user.monthlyTokensRemaining > 0) {
       user.monthlyTokensRemaining = Math.max(
@@ -62,6 +66,10 @@ export const deductTokensWithPriority = async (userId, tokensToDeduct) => {
         user.monthlyTokensRemaining - tokensToDeduct,
       );
     }
+
+    console.log(
+      `[DEBUG] After Update - MonthlyRemaining: ${user.monthlyTokensRemaining}, MonthlyUsed: ${user.monthlyTokensUsed}`,
+    );
 
     await user.save();
 

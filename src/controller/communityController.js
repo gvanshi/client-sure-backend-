@@ -12,6 +12,7 @@ import {
   incrementDailyCount,
   getRemainingLimits,
   areAllLimitsExhausted,
+  decrementDailyCount,
 } from "../utils/dailyLimitsUtils.js";
 
 // Get trending posts
@@ -137,7 +138,7 @@ export const createPost = async (req, res) => {
 
     // Notify all users about new post (async, don't wait)
     notifyNewPost(userId, savedPost._id, savedPost.post_title).catch((err) =>
-      console.error("Error sending new post notifications:", err)
+      console.error("Error sending new post notifications:", err),
     );
 
     res.status(201).json({
@@ -174,19 +175,32 @@ export const deletePost = async (req, res) => {
         .json({ message: "You can only delete your own posts" });
     }
 
-    // Get all unique commenters before deleting the post
+    // Get all unique commenters and likers before deleting
     const commenters = [
       ...new Set(post.comments.map((comment) => comment.user_id.toString())),
     ];
+    const likers = post.likes.map((like) => ({
+      userId: like.user_id.toString(),
+      likedAt: like.likedAt,
+    }));
+
+    // Group likers by ID to count likes per user (in case duplicate check failed or for logic completeness)
+    const likerCounts = {};
+    likers.forEach((liker) => {
+      likerCounts[liker.userId] = (likerCounts[liker.userId] || 0) + 1;
+    });
+
     const totalComments = post.comments.length;
+    const totalLikes = post.likes.length;
 
     console.log(
-      `Deleting post with ${totalComments} comments from ${commenters.length} unique users`
+      `Deleting post with ${totalComments} comments and ${totalLikes} likes`,
     );
 
     // Delete the post
     await Feedback.findByIdAndDelete(postId);
 
+    // === 1. Handle Post Owner ===
     // Deduct points from post owner
     await User.findByIdAndUpdate(userId, {
       $inc: {
@@ -195,37 +209,77 @@ export const deletePost = async (req, res) => {
       },
     });
 
-    // Deduct points from all commenters (2 points per comment)
-    if (commenters.length > 0) {
-      const commenterUpdates = commenters.map(async (commenterId) => {
-        // Count how many comments this user made on this post
-        const userCommentCount = post.comments.filter(
-          (comment) => comment.user_id.toString() === commenterId
-        ).length;
+    // Revert daily limit if post was created today
+    const postDate = new Date(post.createdAt).toDateString();
+    const today = new Date().toDateString();
+    if (postDate === today) {
+      await decrementDailyCount(userId, "posts");
+      console.log(`Decremented post count for user ${userId}`);
+    }
 
-        const pointsToDeduct = userCommentCount * 2;
+    // === 2. Handle Commenters ===
+    if (totalComments > 0) {
+      const commenterUpdates = post.comments.map(async (comment) => {
+        const commenterId = comment.user_id.toString();
 
-        console.log(
-          `Deducting ${pointsToDeduct} points from user ${commenterId} for ${userCommentCount} comments`
-        );
-
-        return User.findByIdAndUpdate(commenterId, {
+        // Deduct points (2 points per comment)
+        await User.findByIdAndUpdate(commenterId, {
           $inc: {
-            points: -pointsToDeduct,
-            "communityActivity.commentsMade": -userCommentCount,
+            points: -2,
+            "communityActivity.commentsMade": -1,
           },
         });
+
+        // Revert daily limit if comment was made today
+        const commentDate = new Date(comment.createdAt).toDateString();
+        if (commentDate === today) {
+          await decrementDailyCount(commenterId, "comments");
+        }
       });
 
       await Promise.all(commenterUpdates);
-      console.log(`Points deducted from ${commenters.length} commenters`);
     }
+
+    // === 3. Handle Likers ===
+    if (totalLikes > 0) {
+      const uniqueLikerIds = Object.keys(likerCounts);
+      const likerUpdates = uniqueLikerIds.map(async (likerId) => {
+        const count = likerCounts[likerId];
+
+        // Deduct points (1 point per like)
+        await User.findByIdAndUpdate(likerId, {
+          $inc: {
+            points: -1 * count,
+            "communityActivity.likesGiven": -1 * count,
+          },
+        }); // Note: logic assumes 1 like per user per post, but safe with count
+
+        // Revert daily limit - check each like's date
+        // Since a user can only like once, we check the Like object for that user
+        const userLike = post.likes.find(
+          (l) => l.user_id.toString() === likerId,
+        );
+        if (userLike && userLike.likedAt) {
+          const likeDate = new Date(userLike.likedAt).toDateString();
+          if (likeDate === today) {
+            await decrementDailyCount(likerId, "likes");
+          }
+        }
+      });
+
+      await Promise.all(likerUpdates);
+    }
+
+    // Get updated limits for the user who initiated the delete (so frontend can update UI)
+    const remainingLimits = await getRemainingLimits(userId);
 
     res.json({
       message: "Post deleted successfully",
+      success: true,
+      remainingLimits,
       details: {
         commentsDeleted: totalComments,
-        usersAffected: commenters.length + 1, // +1 for post owner
+        likesDeleted: totalLikes,
       },
     });
   } catch (error) {
@@ -239,48 +293,60 @@ export const deletePost = async (req, res) => {
 // Update own post
 export const updatePost = async (req, res) => {
   try {
-    const { postId } = req.params
-    const { post_title, description } = req.body
-    const userId = req.user.id
+    const { postId } = req.params;
+    const { post_title, description } = req.body;
+    const userId = req.user.id;
 
-    const post = await Feedback.findById(postId)
+    const post = await Feedback.findById(postId);
     if (!post) {
-      return res.status(404).json({ message: 'Post not found' })
+      return res.status(404).json({ message: "Post not found" });
     }
 
     if (post.user_id.toString() !== userId.toString()) {
-      return res.status(403).json({ message: 'You can only edit your own posts' })
+      return res
+        .status(403)
+        .json({ message: "You can only edit your own posts" });
     }
 
-    if (post_title !== undefined) post.post_title = post_title
-    if (description !== undefined) post.description = description
+    if (post_title !== undefined) post.post_title = post_title;
+    if (description !== undefined) post.description = description;
 
     // Handle new image upload
     if (req.file) {
       try {
-        const uploadResult = await uploadToImageKitCommunity(req.file)
-        post.image = uploadResult.url
+        const uploadResult = await uploadToImageKitCommunity(req.file);
+        post.image = uploadResult.url;
       } catch (uploadError) {
-        console.error('ImageKit upload error:', uploadError)
-        return res.status(500).json({ success: false, message: 'Error uploading image', error: uploadError.message })
+        console.error("ImageKit upload error:", uploadError);
+        return res.status(500).json({
+          success: false,
+          message: "Error uploading image",
+          error: uploadError.message,
+        });
       }
     }
 
-    post.updatedAt = new Date()
-    const saved = await post.save()
+    post.updatedAt = new Date();
+    const saved = await post.save();
 
     // Populate user and comments user data for consistent response
     await Feedback.populate(saved, [
-      { path: 'user_id', select: 'name avatar' },
-      { path: 'comments.user_id', select: 'name avatar' },
-    ])
+      { path: "user_id", select: "name avatar" },
+      { path: "comments.user_id", select: "name avatar" },
+    ]);
 
-    res.json({ success: true, message: 'Post updated successfully', post: saved })
+    res.json({
+      success: true,
+      message: "Post updated successfully",
+      post: saved,
+    });
   } catch (error) {
-    console.error('Error updating post:', error)
-    res.status(500).json({ message: 'Error updating post', error: error.message })
+    console.error("Error updating post:", error);
+    res
+      .status(500)
+      .json({ message: "Error updating post", error: error.message });
   }
-}
+};
 
 // Like post
 export const likePost = async (req, res) => {
@@ -313,7 +379,7 @@ export const likePost = async (req, res) => {
 
     const userIdStr = userId.toString();
     const alreadyLiked = post.likes.some(
-      (like) => like.user_id.toString() === userIdStr
+      (like) => like.user_id.toString() === userIdStr,
     );
 
     if (alreadyLiked) {
@@ -466,9 +532,9 @@ export const addComment = async (req, res) => {
         "new_comment",
         message,
         postId,
-        userId
+        userId,
       ).catch((err) =>
-        console.error("Error creating comment notification:", err)
+        console.error("Error creating comment notification:", err),
       );
     }
 
@@ -663,7 +729,7 @@ export const getLeaderboard = async (req, res) => {
 
     // Check if current user is in top users
     const currentUserInTop = topUsers.some(
-      (topUser) => topUser._id.toString() === userId
+      (topUser) => topUser._id.toString() === userId,
     );
 
     let response = {
