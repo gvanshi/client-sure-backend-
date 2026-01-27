@@ -196,12 +196,18 @@ import {
   distributePrizes,
   getPrizeHistory,
   getPrizeAnalytics,
+  getFilteredPrizeAnalytics,
 } from "../controller/AdminController/prizeController.js";
 router.get("/prize-templates", authenticateAdmin, getPrizeTemplates);
 router.post("/prize-templates", authenticateAdmin, createPrizeTemplate);
 router.get("/leaderboard/filtered", authenticateAdmin, getFilteredLeaderboard);
 router.post("/distribute-prizes", authenticateAdmin, distributePrizes);
 router.get("/prize-history", authenticateAdmin, getPrizeHistory);
+router.get(
+  "/prize-analytics/filtered",
+  authenticateAdmin,
+  getFilteredPrizeAnalytics,
+);
 router.get("/prize-analytics", authenticateAdmin, getPrizeAnalytics);
 
 // POST /api/admin/refresh-tokens - Manual token refresh (for testing)

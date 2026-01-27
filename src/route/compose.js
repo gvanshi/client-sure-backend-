@@ -35,9 +35,7 @@ router.post("/", authenticateToken, async (req, res) => {
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
-    if (user.tokens <= 0) {
-      return res.status(403).json({ ok: false, error: "Insufficient tokens" });
-    }
+    // AI chatbot is free to use - no token check needed
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -69,7 +67,7 @@ router.post("/", authenticateToken, async (req, res) => {
     // ============================================
     if (data) {
       console.log(
-        `[Compose] Structured request for tool: ${data.tool}, variants: ${variants}`
+        `[Compose] Structured request for tool: ${data.tool}, variants: ${variants}`,
       );
 
       // Validate structured input
@@ -134,7 +132,7 @@ router.post("/", authenticateToken, async (req, res) => {
           }
 
           console.log(
-            `[Parse] Successfully parsed ${parsedVariants.length} JSON variants`
+            `[Parse] Successfully parsed ${parsedVariants.length} JSON variants`,
           );
         } catch (parseError) {
           console.error("[Parse] JSON parsing failed:", parseError.message);
@@ -143,7 +141,7 @@ router.post("/", authenticateToken, async (req, res) => {
           // Fallback: Try to extract JSON objects manually
           try {
             const jsonMatches = aiText.match(
-              /\{[^{}]*"subject"[^{}]*"body"[^{}]*\}/g
+              /\{[^{}]*"subject"[^{}]*"body"[^{}]*\}/g,
             );
             if (jsonMatches && jsonMatches.length > 0) {
               parsedVariants = jsonMatches
@@ -158,7 +156,7 @@ router.post("/", authenticateToken, async (req, res) => {
 
               if (parsedVariants.length > 0) {
                 console.log(
-                  `[Parse] Recovered ${parsedVariants.length} variants using regex`
+                  `[Parse] Recovered ${parsedVariants.length} variants using regex`,
                 );
               } else {
                 throw new Error("No valid JSON found");
@@ -187,7 +185,7 @@ router.post("/", authenticateToken, async (req, res) => {
       if (parsedVariants.length > variants) {
         // Too many variants - trim to requested count
         console.log(
-          `[Parse] Trimming ${parsedVariants.length} variants to ${variants}`
+          `[Parse] Trimming ${parsedVariants.length} variants to ${variants}`,
         );
         parsedVariants = parsedVariants.slice(0, variants);
       } else if (
@@ -196,7 +194,7 @@ router.post("/", authenticateToken, async (req, res) => {
       ) {
         // Too few variants - duplicate existing ones to reach requested count
         console.log(
-          `[Parse] Padding ${parsedVariants.length} variants to ${variants}`
+          `[Parse] Padding ${parsedVariants.length} variants to ${variants}`,
         );
         const original = [...parsedVariants];
         while (parsedVariants.length < variants) {
@@ -213,14 +211,8 @@ router.post("/", authenticateToken, async (req, res) => {
         userId: userId,
       });
 
-      // Deduct token
-      user.tokens -= 1;
-      if (typeof user.tokensUsedToday === "number") {
-        user.tokensUsedToday += 1;
-      }
-      if (typeof user.tokensUsedTotal === "number") {
-        user.tokensUsedTotal += 1;
-      }
+      // No token deduction - AI chatbot is free to use
+      // Save for response tracking only
       await user.save();
 
       return res.json({
@@ -240,7 +232,7 @@ router.post("/", authenticateToken, async (req, res) => {
     // ============================================
     if (legacyPrompt) {
       console.log(
-        `[Legacy] Generating ${variants} variants for user ${userId}`
+        `[Legacy] Generating ${variants} variants for user ${userId}`,
       );
 
       const systemPrompt = `You are a helpful AI assistant.
@@ -272,7 +264,7 @@ Prompt: ${legacyPrompt}`;
       // Enforce exact variant count
       if (parsedVariants.length > variants) {
         console.log(
-          `[Legacy] Trimming ${parsedVariants.length} variants to ${variants}`
+          `[Legacy] Trimming ${parsedVariants.length} variants to ${variants}`,
         );
         parsedVariants = parsedVariants.slice(0, variants);
       } else if (
@@ -280,7 +272,7 @@ Prompt: ${legacyPrompt}`;
         parsedVariants.length > 0
       ) {
         console.log(
-          `[Legacy] Padding ${parsedVariants.length} variants to ${variants}`
+          `[Legacy] Padding ${parsedVariants.length} variants to ${variants}`,
         );
         const original = [...parsedVariants];
         while (parsedVariants.length < variants) {
@@ -296,10 +288,7 @@ Prompt: ${legacyPrompt}`;
         userId: userId,
       });
 
-      user.tokens -= 1;
-      if (typeof user.tokensUsedToday === "number") {
-        user.tokensUsedToday += 1;
-      }
+      // No token deduction - AI chatbot is free to use
       await user.save();
 
       return res.json({

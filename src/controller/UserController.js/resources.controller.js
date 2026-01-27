@@ -1,7 +1,6 @@
 // Access resource and reduce tokens
 
 import { Resource, User } from "../../models/index.js";
-import { deductTokensWithPriority } from "../../utils/tokenUtils.js";
 
 // post /api/auth/resources/:id/access
 export const accessResource = async (req, res) => {
@@ -47,18 +46,8 @@ export const accessResource = async (req, res) => {
       });
     }
 
-    // Deduct token (cost: 1)
-    const tokenCost = 1;
-    try {
-      await deductTokensWithPriority(user._id, tokenCost);
-    } catch (err) {
-      if (err.message === "Insufficient tokens") {
-        return res
-          .status(403)
-          .json({ error: "Insufficient tokens. Please top up." });
-      }
-      throw err;
-    }
+    // No token deduction - resources are free to access
+    // (Token deduction only applies to lead unlocking)
 
     // Add to user's accessed resources history
     if (!user.accessedResources) {

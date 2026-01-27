@@ -66,6 +66,7 @@ export const verifySubscriptionPayment = async (req, res) => {
       return res.json({ success: true, message: "Already processed" });
     }
 
+    order.status = "completed"; // Update overall order status
     order.paymentStatus = "completed";
     order.providerOrderId = razorpay_order_id; // Ensure this is set
     order.paymentId = razorpay_payment_id;
