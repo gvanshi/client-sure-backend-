@@ -354,3 +354,108 @@ export const sendWelcomeEmail = async (user, resetToken, planInfo = null) => {
     return false;
   }
 };
+
+/**
+ * Send notification email about new leads being available
+ * @param {string} recipientEmail - User's email
+ * @param {string} recipientName - User's name
+ * @param {number} leadCount - Number of new leads uploaded
+ * @param {boolean} isAdmin - Whether recipient is admin
+ * @returns {Promise<boolean>} Success status
+ */
+export const sendNewLeadsNotification = async (
+  recipientEmail,
+  recipientName,
+  leadCount,
+  isAdmin = false,
+) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      throw new Error("Email transporter not available");
+    }
+
+    const leadsLink = `${process.env.BASE_URL}/${isAdmin ? "admin/leads" : "user/leads"}`;
+    const emailSubject = isAdmin
+      ? `✅ Successfully Uploaded ${leadCount} New Leads - ClientSure`
+      : `🎯 ${leadCount} New Leads Available - ClientSure`;
+
+    const adminMessage = `
+      <p>You have successfully uploaded <strong>${leadCount} new leads</strong> to the platform.</p>
+      <p>All users have been notified about the new leads availability.</p>
+    `;
+
+    const userMessage = `
+      <p>Exciting news! <strong>${leadCount} new leads</strong> have been added to the platform and are now available for you to access.</p>
+      <p>Don't miss out on these fresh opportunities to grow your business!</p>
+    `;
+
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
+      to: recipientEmail,
+      subject: emailSubject,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #007cba 0%, #005a87 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0; font-size: 28px;">ClientSure</h1>
+            <p style="margin: 10px 0 0; font-size: 18px; opacity: 0.9;">${isAdmin ? "✅ Leads Uploaded Successfully" : "🎯 New Leads Available"}</p>
+          </div>
+          
+          <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h2 style="color: #007cba;">Hello ${recipientName},</h2>
+            
+            ${isAdmin ? adminMessage : userMessage}
+            
+            <div style="background: #e3f2fd; padding: 20px; border-left: 4px solid #007cba; margin: 20px 0; border-radius: 5px;">
+              <p style="margin: 0; font-size: 24px; color: #007cba; font-weight: bold;">📊 ${leadCount} New Leads</p>
+              <p style="margin: 10px 0 0; color: #555;">Ready to access now</p>
+            </div>
+            
+            <p style="margin: 30px 0; text-align: center;">
+              <a href="${leadsLink}" 
+                 style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold; font-size: 16px;">
+                ${isAdmin ? "📋 View Uploaded Leads" : "🚀 Access New Leads"}
+              </a>
+            </p>
+            
+            ${
+              !isAdmin
+                ? `
+            <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0; border-radius: 5px;">
+              <p style="margin: 0; color: #856404; font-size: 14px;">
+                <strong>💡 Pro Tip:</strong> Fresh leads often have the highest engagement rates. Access them early to maximize your opportunities!
+              </p>
+            </div>
+            `
+                : ""
+            }
+            
+            <p style="color: #666; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <span style="word-break: break-all; color: #007cba;">${leadsLink}</span>
+            </p>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
+              <p>This email was sent to ${recipientEmail} to notify you about new leads on ClientSure.</p>
+              <p>© ${new Date().getFullYear()} ClientSure. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`New leads notification sent to ${recipientEmail}`);
+    return true;
+  } catch (error) {
+    console.error("Send new leads notification error:", error);
+    return false;
+  }
+};
