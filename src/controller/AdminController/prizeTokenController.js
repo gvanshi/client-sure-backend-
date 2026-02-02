@@ -14,10 +14,13 @@ export const awardPrizeTokens = async (req, res) => {
     const { userId, tokenAmount, prizeType, position } = req.body;
     const adminUsername = req.admin?.username || "admin";
 
-    // Get Admin ID: verify if it's in the token, otherwise find by username
+    // Get Admin ID: verify if it's in the token, otherwise find by name or email
     let adminId = req.admin?.id;
     if (!adminId) {
-      const admin = await Admin.findOne({ username: adminUsername });
+      // Admin model uses 'name' and 'email', not 'username'
+      const admin = await Admin.findOne({
+        $or: [{ name: adminUsername }, { email: adminUsername }],
+      });
       if (admin) adminId = admin._id;
     }
 
@@ -81,28 +84,33 @@ export const awardPrizeTokens = async (req, res) => {
 
     await user.save();
 
-    // Create PrizeDistribution record if we have adminId and valid position
-    if (adminId && position && [1, 2, 3].includes(position)) {
+    // Create PrizeDistribution record if we have adminId
+    if (adminId) {
       try {
         await PrizeDistribution.create({
           userId: user._id,
-          position: position,
+          position: position || 0,
           tokenAmount: tokenAmount,
-          period: "custom", // Treating manual single awards as custom/ad-hoc
+          period: "custom",
           dateRange: {
             start: now,
             end: now,
           },
           awardedAt: now,
           awardedBy: adminId,
-          notificationSent: true, // We are sending notification below
+          notificationSent: true,
           contestName: `Individual Award - ${prizeType}`,
         });
         console.log("✅ PrizeDistribution record created");
       } catch (distError) {
         console.error("Error creating PrizeDistribution record:", distError);
-        // Don't fail the main request
+        // Throw error to make it visible to the client for debugging
+        throw new Error(
+          `Failed to create history record: ${distError.message}`,
+        );
       }
+    } else {
+      console.warn("⚠️ PrizeDistribution skipped: No adminId found");
     }
 
     // Create notification for user
@@ -113,12 +121,12 @@ export const awardPrizeTokens = async (req, res) => {
         "prize_tokens_awarded",
         notificationMessage,
         null, // No specific post ID
-        null // System notification
+        null, // System notification
       );
 
       if (notificationCreated) {
         console.log(
-          `✅ Notification successfully sent to ${user.email} for prize tokens`
+          `✅ Notification successfully sent to ${user.email} for prize tokens`,
         );
       } else {
         console.log(`❌ Failed to send notification to ${user.email}`);
@@ -129,7 +137,7 @@ export const awardPrizeTokens = async (req, res) => {
     }
 
     console.log(
-      `✅ Prize tokens awarded: ${tokenAmount} ${prizeType} tokens to ${user.email} by ${adminUsername}`
+      `✅ Prize tokens awarded: ${tokenAmount} ${prizeType} tokens to ${user.email} by ${adminUsername}`,
     );
 
     res.json({
@@ -178,7 +186,7 @@ export const getUserTokenStatus = async (req, res) => {
     if (user.temporaryTokens && user.temporaryTokens.expiresAt) {
       timeRemaining = Math.max(
         0,
-        new Date(user.temporaryTokens.expiresAt) - new Date()
+        new Date(user.temporaryTokens.expiresAt) - new Date(),
       );
     }
 
