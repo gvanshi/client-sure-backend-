@@ -111,7 +111,6 @@ export const register = async (req, res) => {
         dailyTokens: 0,
         endDate: null,
       },
-      lastLogin: new Date(),
     });
 
     await user.save();
@@ -262,13 +261,6 @@ export const login = async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Check for active subscription/account status
-    if (user.subscription && user.subscription.isActive === false) {
-      return res.status(403).json({
-        error: "Your account has been deactivated. Please contact support.",
-      });
-    }
-
     const now = new Date();
     if (user.subscription.endDate && user.subscription.endDate < now) {
       return res
@@ -306,11 +298,10 @@ export const login = async (req, res) => {
           `⛔ Device limit exceeded for user ${user.email} (${existingSessions.length} active sessions)`,
         );
 
-        // Return 409 Conflict with list of active sessions and userId
+        // Return 409 Conflict with list of active sessions
         return res.status(409).json({
           error: "Device limit exceeded",
           message: "You are logged in on 2 devices. Choose one to log out.",
-          userId: user._id,
           devices: existingSessions.map((s) => ({
             sessionId: s.sessionId,
             deviceName: s.deviceName,
@@ -423,8 +414,10 @@ export const requestReset = async (req, res) => {
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return res.status(404).json({
-        error: "You are not registered or email do not exist check you email",
+      // Security: Don't reveal if user exists or not
+      return res.json({
+        message:
+          "If your email is registered, you will receive a password reset link shortly.",
       });
     }
 
@@ -801,6 +794,15 @@ export const getUserProfile = async (req, res) => {
       );
     }
 
+    // Calculate days remaining for subscription
+    let daysRemaining = 0;
+    if (user.subscription.endDate) {
+      const now = new Date();
+      const endDate = new Date(user.subscription.endDate);
+      const diffTime = endDate - now;
+      daysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    }
+
     res.json({
       user: {
         _id: user._id,
@@ -808,65 +810,31 @@ export const getUserProfile = async (req, res) => {
         email: user.email,
         phone: user.phone,
         avatar: user.avatar,
-        lastLogin: user.lastLogin,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
       },
       tokens: {
-        // Daily tokens (old system compatibility)
         daily: user.tokens,
         dailyUsed: user.tokensUsedToday || 0,
-        dailyLimit: Math.max(
-          user.subscription.dailyTokens || 100,
-          (user.tokens || 0) + (user.tokensUsedToday || 0),
-        ),
+        dailyLimit: user.subscription.dailyTokens || 100,
         monthlyTotal: user.monthlyTokensTotal,
         monthlyUsed: user.monthlyTokensUsed,
         monthlyRemaining: user.monthlyTokensRemaining,
         totalUsed: user.tokensUsedTotal,
-        // Enhanced daily tokens system
-        dailyTokensEnhanced: {
-          current: user.dailyTokens?.current || 0,
-          limit: user.dailyTokens?.limit || 100,
-          usedToday: user.dailyTokens?.usedToday || 0,
-          lastRefreshedAt: user.dailyTokens?.lastRefreshedAt || null,
-        },
-        // Purchased tokens
+        // Bonus token information
+        bonusTokens: user.bonusTokens?.current || 0,
+        bonusTokensInitial: user.bonusTokens?.total || 0,
+        bonusTokensUsed: user.bonusTokens?.used || 0,
+        bonusTokensGrantedAt: user.bonusTokens?.grantedAt || null,
+        // Purchased token information
         purchasedTokens: {
           current: user.purchasedTokens?.current || 0,
           total: user.purchasedTokens?.total || 0,
           used: user.purchasedTokens?.used || 0,
-          lastPurchasedAt: user.purchasedTokens?.lastPurchasedAt || null,
-          expiresAt: user.purchasedTokens?.expiresAt || null,
         },
-        // Bonus token information
-        bonusTokens: user.bonusTokens?.current || 0,
-        bonusTokensInitial: user.bonusTokens?.initial || 0,
-        bonusTokensUsed: user.bonusTokens?.used || 0,
-        bonusTokensGrantedAt: user.bonusTokens?.grantedAt || null,
         // Prize token information
         prizeTokens: user.temporaryTokens?.amount || 0,
         prizeTokenType: user.temporaryTokens?.prizeType || null,
         prizeTokenExpiresAt: user.temporaryTokens?.expiresAt || null,
         prizeTokenTimeRemaining: prizeTokenTimeRemaining,
-        // Prize tokens (enhanced system)
-        prizeTokensEnhanced: {
-          current: user.prizeTokens?.current || 0,
-          used: user.prizeTokens?.used || 0,
-          grantedAt: user.prizeTokens?.grantedAt || null,
-          expiresAt: user.prizeTokens?.expiresAt || null,
-          grantedBy: user.prizeTokens?.grantedBy || null,
-          prizeType: user.prizeTokens?.prizeType || null,
-        },
-        // Token usage statistics
-        tokenStats: {
-          totalUsed: user.tokenStats?.totalUsed || 0,
-          dailyUsed: user.tokenStats?.dailyUsed || 0,
-          purchasedUsed: user.tokenStats?.purchasedUsed || 0,
-          bonusUsed: user.tokenStats?.bonusUsed || 0,
-          prizeUsed: user.tokenStats?.prizeUsed || 0,
-          planPeriodUsed: user.tokenStats?.planPeriodUsed || 0,
-        },
         // Effective total tokens
         effectiveTokens: effectiveTokens,
       },
@@ -876,54 +844,17 @@ export const getUserProfile = async (req, res) => {
               id: user.subscription.planId._id,
               name: user.subscription.planId.name,
               price: user.subscription.planId.price,
-              durationDays: user.subscription.planId.durationDays,
-              dailyTokens: user.subscription.planId.dailyTokens,
-              bonusTokens: user.subscription.planId.bonusTokens,
+              dailyTokens: user.subscription.planId.dailyTokens || 0,
+              durationDays: user.subscription.planId.durationDays || 0,
+              bonusTokens: user.subscription.planId.bonusTokens || 0,
             }
           : null,
         startDate: user.subscription.startDate,
         endDate: user.subscription.endDate,
+        daysRemaining: daysRemaining,
         isActive: user.subscription.endDate
           ? new Date() < user.subscription.endDate
           : false,
-        daysRemaining: user.subscription.endDate
-          ? Math.max(
-              0,
-              Math.ceil(
-                (new Date(user.subscription.endDate) - new Date()) /
-                  (1000 * 60 * 60 * 24),
-              ),
-            )
-          : 0,
-      },
-      referral: {
-        code: user.referralCode || null,
-        referredBy: user.referredBy || null,
-        stats: {
-          totalReferrals: user.referralStats?.totalReferrals || 0,
-          activeReferrals: user.referralStats?.activeReferrals || 0,
-          totalEarnings: user.referralStats?.totalEarnings || 0,
-        },
-        milestoneRewards: {
-          referral8Cycles: user.milestoneRewards?.referral8Cycles || 0,
-          referral15Cycles: user.milestoneRewards?.referral15Cycles || 0,
-          referral25Cycles: user.milestoneRewards?.referral25Cycles || 0,
-          totalTokensEarned: user.milestoneRewards?.totalTokensEarned || 0,
-        },
-      },
-      community: {
-        points: user.points || 0,
-        activity: {
-          postsCreated: user.communityActivity?.postsCreated || 0,
-          commentsMade: user.communityActivity?.commentsMade || 0,
-          likesGiven: user.communityActivity?.likesGiven || 0,
-          likesReceived: user.communityActivity?.likesReceived || 0,
-        },
-        unreadNotifications: user.unreadNotificationCount || 0,
-      },
-      access: {
-        resourcesAccessed: user.accessedResources?.length || 0,
-        leadsAccessed: user.accessedLeads?.length || 0,
       },
     });
   } catch (error) {
@@ -986,47 +917,21 @@ export const changePassword = async (req, res) => {
 // POST /api/auth/logout-device
 export const logoutDevice = async (req, res) => {
   try {
-    const { sessionId, userId } = req.body;
-
-    console.log(`🔍 Logout device request:`, { sessionId, userId });
+    const { sessionId } = req.body;
 
     if (!sessionId) {
       return res.status(400).json({ error: "Session ID is required" });
     }
 
-    if (!userId) {
-      return res.status(400).json({ error: "User ID is required" });
-    }
+    // Delete the specific session from MongoDB
+    const deletedSession = await Session.findOneAndDelete({ sessionId });
 
-    // Find the session first to validate ownership
-    const session = await Session.findOne({ sessionId });
-
-    if (!session) {
-      console.log(`❌ Session not found: ${sessionId}`);
+    if (deletedSession) {
+      console.log(`🔓 Device session deleted (sessionId: ${sessionId})`);
+      res.json({ message: "Device logged out successfully" });
+    } else {
       return res.status(404).json({ error: "Session not found" });
     }
-
-    // Validate that the session belongs to the specified user
-    if (session.userId.toString() !== userId) {
-      console.log(
-        `⚠️ Session ownership mismatch: sessionId=${sessionId}, expected userId=${userId}, actual userId=${session.userId}`,
-      );
-      return res
-        .status(403)
-        .json({ error: "Unauthorized: Session does not belong to this user" });
-    }
-
-    // Delete the session
-    await Session.findOneAndDelete({ sessionId });
-
-    console.log(
-      `🔓 Device session deleted successfully (sessionId: ${sessionId}, userId: ${userId}, device: ${session.deviceName})`,
-    );
-
-    res.json({
-      message: "Device logged out successfully",
-      deviceName: session.deviceName,
-    });
   } catch (error) {
     console.error("Logout device error:", error);
     res.status(500).json({ error: "Internal server error" });

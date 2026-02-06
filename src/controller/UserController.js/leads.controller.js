@@ -424,6 +424,7 @@ export const getAccessedLeads = async (req, res) => {
       search,
       startDate,
       endDate,
+      sortBy = "latest", // default sort
     } = req.query;
 
     const user = await User.findById(userId).select("accessedLeads");
@@ -493,10 +494,8 @@ export const getAccessedLeads = async (req, res) => {
     // 4. Fetch matching leads
     const matchingLeads = await Lead.find(leadQuery);
 
-    // 5. Combine Access Info with Lead Details & Maintain Access Order
-    // We iterate through 'filteredAccessList' (which is ordered by access time)
-    // and keep only those present in 'matchingLeads'.
-    const combinedLeads = filteredAccessList
+    // 5. Combine Access Info with Lead Details
+    let combinedLeads = filteredAccessList
       .map((accessItem) => {
         const leadDetails = matchingLeads.find(
           (l) => l._id.toString() === accessItem.leadId.toString(),
@@ -526,6 +525,30 @@ export const getAccessedLeads = async (req, res) => {
         };
       })
       .filter((item) => item !== null);
+
+    // Sort the combined list
+    if (sortBy === "default") {
+      combinedLeads.sort((a, b) => {
+        const dateA = a.lastVerifiedAt
+          ? new Date(a.lastVerifiedAt).getTime()
+          : 0;
+        const dateB = b.lastVerifiedAt
+          ? new Date(b.lastVerifiedAt).getTime()
+          : 0;
+        return dateB - dateA; // Descending order (newest verified first)
+      });
+    } else {
+      // Default: latest accessed first
+      // Since filteredAccessList is already in order (LIFO from accessLead),
+      // and map preserves order, we just need to ensure reverse sorting if needed,
+      // but usually LIFO is the default "latest added".
+      // Let's explicitly sort by accessedAt to be safe.
+      combinedLeads.sort((a, b) => {
+        return (
+          new Date(b.accessedAt).getTime() - new Date(a.accessedAt).getTime()
+        );
+      });
+    }
 
     // 6. Pagination on the memory list
     const totalItems = combinedLeads.length;
