@@ -1,5 +1,5 @@
 import { User, ReferralReward } from "../../models/index.js";
-import { User, ReferralReward } from "../../models/index.js";
+
 import { sendEmail, sendRewardNotification } from "../../utils/emailUtils.js";
 
 const ADMIN_EMAIL = "yadavsatyamsingh078@gmail.com";
@@ -203,11 +203,9 @@ export const awardReferralReward = async (req, res) => {
     });
 
     if (existingReward) {
-      return res
-        .status(400)
-        .json({
-          error: "User has already been rewarded for this referral milestone",
-        });
+      return res.status(400).json({
+        error: "User has already been rewarded for this referral milestone",
+      });
     }
 
     // Add tokens to user account
