@@ -10,6 +10,7 @@ import {
   sendEmailWithRetry,
   sendPasswordResetConfirmationEmail,
   sendWelcomeEmail,
+  sendLoginNotification,
 } from "../../utils/emailUtils.js";
 import {
   generateReferralCode,
@@ -331,6 +332,13 @@ export const login = async (req, res) => {
         `✅ New session created for ${user.email} on ${userDeviceName}`,
       );
     }
+
+    // Send login notification (async, don't await/block response)
+    const ipAddress = req.ip || req.connection.remoteAddress || "Unknown IP";
+    sendLoginNotification(user, {
+      ip: ipAddress,
+      device: userDeviceName,
+    }).catch((err) => console.error("Login notification failed:", err));
 
     // Update user last login
     user.lastLogin = new Date();

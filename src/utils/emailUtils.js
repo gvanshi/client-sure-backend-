@@ -459,3 +459,194 @@ export const sendNewLeadsNotification = async (
     return false;
   }
 };
+
+/**
+ * Send login notification for security
+ * @param {object} user - User object
+ * @param {object} loginDetails - Login details (ip, device, time)
+ * @returns {Promise<boolean>} Success status
+ */
+export const sendLoginNotification = async (user, loginDetails) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) return false;
+
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: "New Login Detected - ClientSure Security",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-top: 4px solid #17a2b8;">
+            <h2 style="color: #17a2b8; margin-top: 0;">New Login Alert 🔐</h2>
+            <p>Hello ${user.name},</p>
+            <p>We detected a new login to your ClientSure account.</p>
+            
+            <div style="background: white; padding: 15px; border-radius: 5px; margin: 15px 0; border: 1px solid #dee2e6;">
+              <p style="margin: 5px 0;"><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+              <p style="margin: 5px 0;"><strong>Device:</strong> ${loginDetails.device || "Unknown Device"}</p>
+              ${loginDetails.ip ? `<p style="margin: 5px 0;"><strong>IP Address:</strong> ${loginDetails.ip}</p>` : ""}
+            </div>
+
+            <p style="font-size: 14px; color: #666;">If this was you, you can ignore this email. If you don't recognize this activity, please reset your password immediately and contact support.</p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`Login notification sent to ${user.email}`);
+    return true;
+  } catch (error) {
+    console.error("Send login notification error:", error);
+    return false;
+  }
+};
+
+/**
+ * Send new resource notification
+ * @param {string} recipientEmail - User's email
+ * @param {string} recipientName - User's name
+ * @param {object} resource - Resource details
+ * @returns {Promise<boolean>} Success status
+ */
+export const sendNewResourceNotification = async (
+  recipientEmail,
+  recipientName,
+  resource,
+) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) return false;
+
+    const resourceLink = `${process.env.BASE_URL}/user/resources`;
+
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
+      to: recipientEmail,
+      subject: `New Resource Added: ${resource.title} - ClientSure`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+             <h2 style="margin: 0;">New Resource Available 📚</h2>
+          </div>
+          
+          <div style="padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
+            <p>Hello ${recipientName},</p>
+            <p>A new resource has been added to the library that might be valuable for you.</p>
+            
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+              <h3 style="margin-top: 0; color: #2d3748;">${resource.title}</h3>
+              <p style="color: #666; margin-bottom: 0;">${resource.description || "Check out this new resource to enhance your knowledge."}</p>
+            </div>
+
+            <p style="text-align: center; margin-top: 25px;">
+              <a href="${resourceLink}" style="background: #667eea; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Access Resource</a>
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`Resource notification sent to ${recipientEmail}`);
+    return true;
+  } catch (error) {
+    console.error("Send resource notification error:", error);
+    return false;
+  }
+};
+
+/**
+ * Send reward notification (Leaderboard, Referral, etc.)
+ * @param {object} user - User object
+ * @param {string} rewardType - Type of reward (leaderboard, referral, milestone, general)
+ * @param {number} amount - Amount of tokens awarded
+ * @param {string} customMessage - custom message for the reward
+ * @returns {Promise<boolean>} Success status
+ */
+export const sendRewardNotification = async (
+  user,
+  rewardType,
+  amount,
+  customMessage = "",
+) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) return false;
+
+    let subject = "You've Earned Rewards! 🏆 - ClientSure";
+    let title = "Congratulations! You've Earned Rewards";
+    let icon = "🏆";
+    let color = "#ffc107"; // Gold default
+
+    switch (rewardType) {
+      case "leaderboard":
+        subject = "You're a Winner! Leaderboard Reward - ClientSure";
+        title = "Top Performer Alert!";
+        icon = "🥇";
+        color = "#ffc107";
+        break;
+      case "referral":
+        subject = "Referral Bonus Received! 🤝 - ClientSure";
+        title = "Thanks for Referring!";
+        icon = "🤝";
+        color = "#28a745"; // Green
+        break;
+      case "milestone":
+        subject = "Milestone Unlocked! 🚀 - ClientSure";
+        title = "Milestone Achieved!";
+        icon = "🚀";
+        color = "#17a2b8"; // Blue
+        break;
+    }
+
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || "ClientSure"}" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: subject,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: ${color}; color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+             <h1 style="margin: 0; font-size: 48px;">${icon}</h1>
+             <h2 style="margin: 10px 0 0;">${title}</h2>
+          </div>
+          
+          <div style="padding: 30px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
+            <p>Hello ${user.name},</p>
+            <p>Great news! You have been awarded <strong>${amount} tokens</strong>.</p>
+            
+            ${customMessage ? `<p>${customMessage}</p>` : ""}
+
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 25px 0; text-align: center; border: 2px dashed ${color};">
+              <span style="font-size: 14px; color: #666; display: block; margin-bottom: 5px;">You Received</span>
+              <span style="font-size: 32px; font-weight: bold; color: ${color};">${amount} Tokens</span>
+            </div>
+
+            <p style="text-align: center; margin-top: 25px;">
+              <a href="${process.env.BASE_URL}/user/dashboard" style="background: ${color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">View My Rewards</a>
+            </p>
+            
+            <p style="font-size: 12px; color: #999; margin-top: 30px;">Keep up the great work and continue to earn more rewards!</p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`Reward notification (${rewardType}) sent to ${user.email}`);
+    return true;
+  } catch (error) {
+    console.error("Send reward notification error:", error);
+    return false;
+  }
+};

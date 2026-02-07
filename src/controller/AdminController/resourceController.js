@@ -1,5 +1,7 @@
 import { uploadToImageKit } from "../../config/imagekit.js";
 import Resource from "../../models/Resource.js";
+import User from "../../models/User.js";
+import { sendNewResourceNotification } from "../../utils/emailUtils.js";
 
 // POST /api/admin/resources
 export const createResource = async (req, res) => {
@@ -66,7 +68,7 @@ export const createResource = async (req, res) => {
         "/clientsure-resources",
         {
           tags: [type, "resource"],
-        }
+        },
       );
 
       console.log("ImageKit upload success:", result.url);
@@ -106,6 +108,29 @@ export const createResource = async (req, res) => {
       isActive: resource.isActive,
       type: resource.type,
     });
+
+    // Notify all users about new resource (Async)
+    const notifyUsers = async () => {
+      try {
+        const users = await User.find({}, "email name");
+        console.log(
+          `📧 Sending resource notification to ${users.length} users...`,
+        );
+        for (const user of users) {
+          sendNewResourceNotification(user.email, user.name, resource).catch(
+            (err) =>
+              console.error(
+                `Failed to notify ${user.email} about resource:`,
+                err,
+              ),
+          );
+        }
+      } catch (err) {
+        console.error("Error fetching users for notification:", err);
+      }
+    };
+    notifyUsers();
+
     res.status(201).json(resource);
   } catch (error) {
     console.error("Create resource error:", error);
@@ -178,7 +203,7 @@ export const updateResource = async (req, res) => {
         "/clientsure-resources",
         {
           tags: [resource.type, "resource"],
-        }
+        },
       );
 
       resource.url = result.url;

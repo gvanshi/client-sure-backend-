@@ -1,4 +1,5 @@
 import User from "../../models/User.js";
+import { sendRewardNotification } from "../../utils/emailUtils.js";
 
 // GET /api/admin/users
 export const getUsers = async (req, res) => {
@@ -37,8 +38,21 @@ export const updateUserTokens = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    const oldTokens = user.tokens || 0;
     user.tokens = tokens;
     await user.save();
+
+    // Send notification if tokens increased
+    if (tokens > oldTokens) {
+      const diff = tokens - oldTokens;
+      await sendRewardNotification(
+        user,
+        "milestone",
+        diff,
+        "An admin has added tokens to your account.",
+      );
+    }
+
     res.json({ message: "User tokens updated successfully", user });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -66,7 +80,7 @@ export const updateUserStatus = async (req, res) => {
       const now = new Date();
       if (!user.subscription.endDate || user.subscription.endDate < now) {
         const thirtyDaysFromNow = new Date(
-          now.getTime() + 30 * 24 * 60 * 60 * 1000
+          now.getTime() + 30 * 24 * 60 * 60 * 1000,
         );
         user.subscription.endDate = thirtyDaysFromNow;
         console.log(`Extended subscription for ${user.email} by 30 days`);

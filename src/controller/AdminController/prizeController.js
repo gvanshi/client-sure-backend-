@@ -1,5 +1,5 @@
 import { User, PrizeDistribution, PrizeTemplate } from "../../models/index.js";
-import { sendEmail } from "../../utils/emailUtils.js";
+import { sendEmail, sendRewardNotification } from "../../utils/emailUtils.js";
 
 // GET /api/admin/prize-templates
 export const getPrizeTemplates = async (req, res) => {
@@ -183,17 +183,15 @@ export const distributePrizes = async (req, res) => {
       // Send notification email
       const positionText =
         position === 1 ? "1st" : position === 2 ? "2nd" : "3rd";
-      const emailSubject = `🏆 Congratulations! You won ${positionText} place in ${contestName}`;
-      const emailBody = `
-        <h2>🎉 Congratulations ${user.name}!</h2>
-        <p>You have won <strong>${positionText} place</strong> in the <strong>${contestName}</strong>!</p>
-        <p>🎁 <strong>Prize:</strong> ${tokenAmount} tokens have been added to your account.</p>
-        <p>Keep up the great work in our community!</p>
-        <p>Best regards,<br>Client Sure Team</p>
-      `;
+      const customMessage = `You have won <strong>${positionText} place</strong> in the <strong>${contestName}</strong>!`;
 
       try {
-        await sendEmail(user.email, emailSubject, emailBody);
+        await sendRewardNotification(
+          user,
+          "leaderboard",
+          tokenAmount,
+          customMessage,
+        );
         distribution.emailSent = true;
         await distribution.save();
       } catch (emailError) {
