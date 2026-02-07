@@ -174,7 +174,9 @@ router.post("/", authenticateToken, async (req, res) => {
         // Plain text variants
         // Try to split by common delimiters if multiple variants requested
         if (variants > 1) {
-          const splits = aiText.split(/\n\n---\n\n|\n\nVariant \d+:?\n\n/i);
+          const splits = aiText.split(
+            /\n\n---+\n\n|\n\n---\n\n|\n\n\*{3,}\n\n|\n\nVariant \d+:?\n\n/i,
+          );
           parsedVariants = splits.filter((s) => s.trim().length > 0);
         } else {
           parsedVariants = [aiText];

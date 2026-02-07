@@ -206,7 +206,7 @@ This is a STRICT requirement - NO EXCEPTIONS ALLOWED.
   const senderSection =
     senderInfo.length > 0
       ? `Sender Information:\n${senderInfo.join(
-          "\n"
+          "\n",
         )}\n\n⚠️ IMPORTANT: Use the ACTUAL sender name "${
           senderName || senderRole
         }" in the ${
@@ -260,6 +260,9 @@ This is a STRICT requirement - NO EXCEPTIONS ALLOWED.
     variants > 1 ? `Generate ${variants} distinct variations.` : "",
     variants > 1 && tool === "emails"
       ? 'Return as JSON array: [{"subject":"...","preview":"...","body":"..."},...]'
+      : "",
+    variants > 1 && tool !== "emails"
+      ? 'Separate each variation with a line containing only "---". Example:\nVariation 1 content...\n\n---\n\nVariation 2 content...'
       : "",
   ];
 

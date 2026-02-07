@@ -443,6 +443,7 @@ export const unlikePost = async (req, res) => {
     }
 
     // Remove the like
+    const likeToRemove = post.likes[likeIndex]; // Capture like before removing
     post.likes.splice(likeIndex, 1);
     await post.save();
 
@@ -453,6 +454,15 @@ export const unlikePost = async (req, res) => {
         "communityActivity.likesGiven": -1,
       },
     });
+
+    // Revert daily limit if like was made today
+    if (likeToRemove && likeToRemove.likedAt) {
+      const likeDate = new Date(likeToRemove.likedAt).toDateString();
+      const today = new Date().toDateString();
+      if (likeDate === today) {
+        await decrementDailyCount(userId, "likes");
+      }
+    }
 
     res.json({ message: "Post unliked successfully" });
   } catch (error) {
@@ -579,6 +589,13 @@ export const deleteComment = async (req, res) => {
         "communityActivity.commentsMade": -1,
       },
     });
+
+    // Revert daily limit if comment was made today
+    const commentDate = new Date(comment.createdAt).toDateString();
+    const today = new Date().toDateString();
+    if (commentDate === today) {
+      await decrementDailyCount(userId, "comments");
+    }
 
     res.json({ message: "Comment deleted successfully" });
   } catch (error) {

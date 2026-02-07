@@ -63,8 +63,23 @@ export const getLeads = async (req, res) => {
       }
     }
 
+    // Sorting logic
+    let sortOptions = { uploadSequence: -1, createdAt: -1 };
+
+    if (req.query.sortBy === "oldest") {
+      sortOptions = { createdAt: 1 };
+    } else if (req.query.sortBy === "name_asc") {
+      sortOptions = { name: 1 };
+    } else if (req.query.sortBy === "name_desc") {
+      sortOptions = { name: -1 };
+    } else if (req.query.sortBy === "verified") {
+      sortOptions = { lastVerifiedAt: -1 };
+    } else if (req.query.sortBy === "newest") {
+      sortOptions = { createdAt: -1 };
+    }
+
     const leads = await Lead.find(query)
-      .sort({ uploadSequence: -1, createdAt: -1 })
+      .sort(sortOptions)
       .skip(skip)
       .limit(parseInt(limit));
 
